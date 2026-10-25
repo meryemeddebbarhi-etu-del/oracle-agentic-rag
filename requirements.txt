@@ -1,2 +1,8 @@
 oracledb
 python-dotenv
+pypdf
+langchain-text-splitters
+langchain-oracledb
+langchain-huggingface
+sentence-transformers
+packaging<26
