@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_oracledb import OracleVS
-from langchain_oracledb.vectorstores.oraclevs import DistanceStrategy
+from langchain_oracledb.vectorstores.oraclevs import DistanceStrategy, create_index
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
@@ -18,6 +18,9 @@ CHEVAUCHEMENT = 80     # caractères répétés entre deux morceaux
 
 MODELE_EMBEDDING = "sentence-transformers/all-MiniLM-L12-v2"
 NOM_TABLE = "DOCUMENTS_RAG"
+INDEX_VECTORIEL = "DOCUMENTS_RAG_HNSW_IDX"
+INDEX_IVF = "DOCUMENTS_RAG_IVF_IDX"
+INDEX_TEXTE = "DOCUMENTS_RAG_TEXT_IDX"
 
 
 def lire_fichier(chemin: Path) -> list[dict]:
@@ -71,8 +74,53 @@ def decouper_documents(documents: list[dict]) -> list[dict]:
     return morceaux
 
 
+def creer_index(conn, vector_store) -> None:
+    """Crée l'index vectoriel (HNSW, sinon IVF) et l'index texte (mots-clés).
+
+    Une erreur sur un index n'arrête pas le programme : on affiche un message.
+    """
+    try:
+        create_index(
+            conn,
+            vector_store,
+            params={
+                "idx_name": INDEX_VECTORIEL,
+                "idx_type": "HNSW",
+                "accuracy": 95,
+                "parallel": 4,
+            },
+        )
+        print(f"Index vectoriel HNSW créé : {INDEX_VECTORIEL}")
+    except Exception as erreur:
+        print(f"Index HNSW NON créé ({erreur}). Essai avec un index IVF...")
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"CREATE VECTOR INDEX {INDEX_IVF} ON {NOM_TABLE}(embedding) "
+                "ORGANIZATION NEIGHBOR PARTITIONS "
+                "DISTANCE COSINE WITH TARGET ACCURACY 90"
+            )
+            conn.commit()
+            cur.close()
+            print(f"Index vectoriel IVF créé : {INDEX_IVF}")
+        except Exception as erreur_ivf:
+            print(f"Index vectoriel IVF NON créé : {erreur_ivf}")
+
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"CREATE INDEX {INDEX_TEXTE} ON {NOM_TABLE}(text) "
+            "INDEXTYPE IS CTXSYS.CONTEXT PARAMETERS ('SYNC (ON COMMIT)')"
+        )
+        conn.commit()
+        cur.close()
+        print(f"Index texte créé : {INDEX_TEXTE}")
+    except Exception as erreur:
+        print(f"Index texte NON créé : {erreur}")
+
+
 def ranger_dans_oracle(morceaux: list[dict]) -> int:
-    """Calcule les embeddings et range les morceaux dans Oracle. Renvoie le nombre de lignes."""
+    """Calcule les embeddings, range les morceaux dans Oracle et crée les index."""
     load_dotenv()
     conn = oracledb.connect(
         user=os.getenv("ORACLE_USER"),
@@ -80,7 +128,7 @@ def ranger_dans_oracle(morceaux: list[dict]) -> int:
         dsn=os.getenv("ORACLE_DSN"),
     )
 
-    # Repartir d'une table propre à chaque lancement
+    # Repartir d'une table propre à chaque lancement (les index partent avec elle)
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = :1", [NOM_TABLE])
     if cur.fetchone()[0] > 0:
@@ -101,7 +149,7 @@ def ranger_dans_oracle(morceaux: list[dict]) -> int:
     ]
 
     embeddings = HuggingFaceEmbeddings(model_name=MODELE_EMBEDDING)
-    OracleVS.from_documents(
+    vector_store = OracleVS.from_documents(
         documents,
         embeddings,
         client=conn,
@@ -113,6 +161,9 @@ def ranger_dans_oracle(morceaux: list[dict]) -> int:
     cur.execute(f"SELECT COUNT(*) FROM {NOM_TABLE}")
     nombre = cur.fetchone()[0]
     cur.close()
+
+    creer_index(conn, vector_store)
+
     conn.close()
     return nombre
 
