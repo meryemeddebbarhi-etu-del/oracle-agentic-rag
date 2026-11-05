@@ -6,3 +6,4 @@ langchain-oracledb
 langchain-huggingface
 sentence-transformers
 packaging<26
+pytest
