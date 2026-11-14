@@ -1,127 +1,105 @@
-# oracle-agentic-rag
+# Oracle Agentic RAG Hybrid Search
 
-Projet Oracle Agentic RAG Hybrid Search : un assistant qui répond à des questions
-en cherchant dans nos propres documents, avec Oracle 26ai, LangGraph et Streamlit.
-
-## Partie Base de données et documents (Membre 1)
-
-Ce module prépare la base Oracle : connexion, lecture des documents,
-découpage en morceaux, embeddings et indexation.
-
-## Prérequis
-
-- Python 3.11 ou plus (3.14 recommandé). Cocher « Add python.exe to PATH » à l'installation.
-- Oracle Database 26ai (machine virtuelle ou Docker).
-- Git.
+Ce dépôt réunit l'ingestion Oracle (membre 1), les recherches vectorielle, mot-clé et hybride (membre 2), puis un agent LangGraph ReAct qui construit les réponses avec leurs sources (membre 3). L'interface Streamlit pourra appeler `RAGAgent.ask()` et afficher son résultat structuré.
 
 ## Installation
 
-1. Cloner le dépôt et se placer dedans :
-   ```
-   git clone https://github.com/meryemeddebbarhi-etu-del/oracle-agentic-rag.git
-   cd oracle-agentic-rag
-   ```
-2. Installer les bibliothèques :
-   ```
-   python -m pip install -r requirements.txt
-   ```
-3. Créer l'utilisateur Oracle. Se connecter en administrateur (sqlplus / as sysdba),
-   se placer dans la base (ALTER SESSION SET CONTAINER = nom_de_votre_pdb;),
-   puis exécuter une commande à la fois :
-   ```sql
-   CREATE USER vector IDENTIFIED BY vector DEFAULT TABLESPACE users QUOTA UNLIMITED ON users;
-   GRANT CONNECT, RESOURCE TO vector;
-   GRANT DB_DEVELOPER_ROLE TO vector;
-   GRANT CREATE MINING MODEL TO vector;
-   ```
-4. Copier `.env.example` en `.env` et mettre vos propres valeurs :
-   ```
-   ORACLE_USER=vector
-   ORACLE_PWD=vector
-   ORACLE_DSN=ADRESSE_DE_VOTRE_ORACLE:1521/NOM_DU_SERVICE
-   ```
-   Le fichier `.env` ne doit jamais être publié sur GitHub.
+Avec Python 3.11 ou plus, dans un terminal ouvert à la racine du projet :
 
-## Tester la connexion
-
-```
-python database\test_connexion.py
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-Résultat attendu : `Connecté ! Oracle AI Database 26ai ...`
+Si `.env` n'existe pas encore, crée-le avec `Copy-Item .env.example .env`. S'il existe déjà, garde-le et ajoute seulement les paramètres LLM manquants ci-dessous. Complète `.env` avec vos propres identifiants Oracle et la clé du fournisseur LLM choisi. Ne partage pas et ne publie jamais `.env`.
 
-## Partie Recherche (Membre 2)
+Le ZIP fusionné ne contient pas `.env`; il ne remplace donc pas tes secrets locaux. Si ton dépôt contient encore l'ancien fichier simple `agent.py` créé avant cette fusion, supprime-le avant extraction : l'agent intégré est le package `agent/`.
 
-Ce module interroge la table `DOCUMENTS_RAG` déjà créée et remplie par
-Membre 1 (connexion, index vectoriel HNSW/IVF, index Oracle Text) et propose
-trois méthodes de recherche, chacune renvoyant une liste de `SearchResult` au
-format identique :
+## LLM et clé API
 
-| Méthode | Fichier | Principe |
-|---|---|---|
-| `vector_search(query, top_k)` | `search/vector_search.py` | Similarité cosinus sur `embedding` (`VECTOR_DISTANCE`), utilise l'index HNSW/IVF de Membre 1 |
-| `keyword_search(query, top_k)` | `search/keyword_search.py` | `CONTAINS(text, ...)` sur l'index Oracle Text `DOCUMENTS_RAG_TEXT_IDX` de Membre 1 |
-| `hybrid_search(query, top_k)` | `search/hybrid_search.py` | Fusion des deux listes ci-dessus par **Reciprocal Rank Fusion (RRF)** |
+Le code utilise Groq par défaut. Crée une clé dans [GroqCloud API Keys](https://console.groq.com/keys), puis renseigne dans `.env` :
 
-Aucun de ces modules ne crée de table ni d'index : ils réutilisent entièrement
-ce que `database/ingestion.py` a déjà mis en place.
+```env
+LLM_PROVIDER=groq
+GROQ_API_KEY=ta_cle_groq
+GROQ_MODEL=openai/gpt-oss-120b
+```
 
-### Pourquoi RRF pour la recherche hybride ?
+`openai/gpt-oss-120b` est un nom de modèle hébergé par Groq; la clé reste une clé Groq. Le modèle configuré auparavant (`llama-3.3-70b-versatile`) a été déprécié pour les comptes Free et Developer en août 2026. Vérifie les limites et le tarif du palier affiché dans ton compte avant d'utiliser l'API.
 
-Le score vectoriel (similarité cosinus, environ -1 à 1) et le score Oracle
-Text (`SCORE(1)`, un entier non borné propre à Oracle Text) ne sont pas sur la
-même échelle. RRF ne combine que le **rang** de chaque document dans chaque
-liste (1er, 2e, 3e...), pas la valeur brute du score, ce qui évite toute
-normalisation arbitraire. Détails, formule et limites assumées : voir les
-commentaires en tête de `search/hybrid_search.py`.
+Sans API distante, tu peux mettre `LLM_PROVIDER=fake` pour une démonstration hors ligne avec le backend mock et une méthode directe (`hybrid`, `vector` ou `keyword`). Le faux modèle renvoie un texte de démonstration, pas une vraie réponse rédigée. Le mode `auto` utilise l'appel d'outils LangGraph et demande un LLM compatible avec le tool calling.
 
-### Format de résultat (interface pour Membre 3)
+L'alternative OpenAI est également prévue dans le code :
+
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=ta_cle_openai
+OPENAI_MODEL=gpt-4o-mini
+```
+
+L'API OpenAI se facture séparément d'un abonnement ChatGPT.
+
+## Organisation de la recherche et de l'agent
+
+- `search/` contient le vrai moteur du membre 2 : `vector_search`, `keyword_search`, `hybrid_search` et `SearchResult`.
+- `agent_search/` contient le pont de l'agent, le mode mock et `RealSearchAdapter`. En backend `real`, ce pont importe le package Oracle du membre 2 sous le nom `search` et convertit ses `SearchResult` via `to_dict()`.
+- `agent/graph.py` construit le graphe ReAct avec trois outils de recherche. Le modèle choisit l'outil en mode `auto`.
+- `agent/agent.py` est le point d'entrée `RAGAgent.ask(...)`; la réponse est un dictionnaire avec la réponse, les sources, la méthode choisie, les résultats et les éventuelles erreurs.
+- `agent/context_builder.py` et `agent/response_generator.py` préparent le contexte, les citations et le cas où les documents ne suffisent pas.
+- `config/settings.py` lit les variables de configuration depuis `.env`.
+
+Le conflit de nom entre les deux dossiers `search/` est résolu en conservant `search/` pour le moteur Oracle du membre 2 et en renommant le pont mock de l'agent `agent_search/`.
+
+## Étapes de lancement
+
+### 1. Démo hors ligne, sans Oracle ni clé LLM
+
+Dans `.env`, choisis `SEARCH_BACKEND=mock`, `LLM_PROVIDER=fake`, `DEFAULT_SEARCH_METHOD=hybrid`, puis :
+
+```powershell
+python main.py --backend mock --method hybrid --question "Comment fonctionne DHCP ?"
+```
+
+Cette étape montre le passage de la question par le moteur mock, la structure de la réponse et les sources simulées. Le faux modèle ne rédige pas une vraie explication.
+
+### 2. Agent LangGraph avec Groq et recherche mock
+
+Après avoir ajouté une clé Groq dans `.env` :
+
+```powershell
+python main.py --backend mock --method auto --question "Comment fonctionne DHCP ?"
+```
+
+En mode `auto`, le graphe ReAct décide d'appeler la recherche vectorielle, mot-clé ou hybride, puis rédige une réponse fondée sur les passages trouvés.
+
+### 3. Recherche réelle dans Oracle
+
+Avant de lancer l'agent en mode réel, la base Oracle doit être accessible et remplie par le module d'ingestion. Vérifie avec le membre 1 avant d'exécuter `database/ingestion.py` : **ce script supprime et recrée la table `DOCUMENTS_RAG` à chaque exécution**.
+
+Quand la table et ses index sont prêts, mets `SEARCH_BACKEND=real` dans `.env`, puis lance :
+
+```powershell
+python main.py --backend real --method hybrid --question "Comment fonctionne DHCP ?"
+python main.py --backend real --method auto --question "Comment fonctionne DHCP ?"
+```
+
+Le premier appel laisse la méthode hybride répondre directement; le deuxième laisse LangGraph choisir et appeler ses outils. Les deux ont besoin d'un LLM configuré pour une réponse rédigée.
+
+## Interface Streamlit (membre 4)
+
+L'application peut créer une ressource `RAGAgent` une seule fois, puis faire :
 
 ```python
-from search import vector_search, keyword_search, hybrid_search, SearchError
+from agent import RAGAgent
 
-resultats = hybrid_search("comment fonctionne le DHCP ?", top_k=5)
-for r in resultats:
-    print(r.chunk_id, r.document_id, r.source, r.score, r.search_method)
-    print(r.content[:200])
+agent = RAGAgent()
+resultat = agent.ask(question_utilisateur, method=methode_choisie)
+st.write(resultat["answer"])
+for source in resultat["sources"]:
+    st.caption(source["source"])
+if resultat["error"]:
+    st.error(resultat["error"])
 ```
 
-Chaque `SearchResult` expose : `chunk_id`, `document_id`, `content`, `source`,
-`score`, `search_method`, `metadata` (dict). `document_id` est le nom du
-fichier source (`metadata["source"]`) : le schéma de Membre 1 ne contient pas
-d'identifiant de document distinct du nom de fichier.
-
-Les trois fonctions lèvent `search.SearchError` (jamais une exception Oracle
-brute) en cas de requête vide, de `top_k` invalide, d'échec de connexion, ou
-d'index manquant — avec un message explicite indiquant quoi corriger.
-
-### Exécuter les tests
-
-```
-python -m pytest tests/ -v
-```
-
-- `tests/test_search_utils.py`, `tests/test_hybrid_fusion.py` : tests **purs**
-  (validation, construction de requête Oracle Text, fusion RRF avec des
-  doubles de test) — s'exécutent partout, aucune base Oracle requise.
-- `tests/test_vector_search.py`, `tests/test_keyword_search.py`,
-  `tests/test_hybrid_search.py` : tests **d'intégration**, nécessitent la base
-  Oracle de Membre 1 déjà remplie (`python database\ingestion.py` exécuté
-  avant) et un accès réseau pour le modèle d'embeddings. Si la base n'est pas
-  joignable, ils sont **SKIP** (pas échoués) avec un message explicite.
-
-## Structure du dépôt
-
-```
-database/     connexion, ingestion et indexation (Membre 1)
-search/       vector_search, keyword_search, hybrid_search, résultat standardisé (Membre 2)
-tests/        tests unitaires (purs) et tests d'intégration (base Oracle requise)
-documents/    documents de test (PDF, TXT)
-.env.example  modèle de configuration
-requirements.txt
-```
-
-## À venir
-
-- Agent LangGraph / ReAct s'appuyant sur `search.hybrid_search` (Membre 3)
-- Interface Streamlit
+Les méthodes acceptées sont `auto`, `vector`, `keyword` et `hybrid`. Le détail du résultat inclut aussi `no_answer_found`, `ambiguous` et `raw_results`.
