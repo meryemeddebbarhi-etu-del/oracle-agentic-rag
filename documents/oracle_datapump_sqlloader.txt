@@ -1,0 +1,53 @@
+Oracle 19c : Data Pump, export/import classique et SQL*Loader
+
+1. Déplacer des données : architecture générale
+
+Oracle propose plusieurs outils pour charger et déplacer des données et des métadonnées : Oracle Data Pump (expdp et impdp, appelable aussi via le package DBMS_DATAPUMP), l'export/import classique (exp et imp), SQL*Loader pour charger des fichiers externes et les tables externes. Data Pump est accessible en ligne de commande interactive et dans Enterprise Manager Cloud Control, et propose plusieurs méthodes de déplacement : chemin conventionnel (conventional path), tablespace transportable (transportable tablespace) et support du lien réseau (network link).
+
+2. Avantages d'Oracle Data Pump
+
+Data Pump offre une sélection fine des objets et des données, la spécification explicite de la version de la base, l'exécution parallèle, le mode réseau dans un environnement distribué, des possibilités de remappage, l'échantillonnage des données et la compression des métadonnées, la compression des données pendant l'export, la sécurité par chiffrement, la possibilité d'exporter les types XMLType en CLOB, la possibilité de se détacher d'un travail long et de s'y rattacher à nouveau, et le redémarrage des travaux Data Pump.
+
+3. Sauvegarder avec Data Pump : le répertoire (directory)
+
+Avec Data Pump, on doit spécifier un répertoire Oracle (directory object), qui associe un nom à un chemin physique du serveur. Le répertoire doit appartenir à l'utilisateur système oracle. On le crée dans la base : CREATE DIRECTORY dumps AS '/home/oracle/dump2/'; puis on donne les droits à l'utilisateur concerné : GRANT READ, WRITE ON DIRECTORY dumps TO hr. Dans l'exemple du cours, l'utilisateur hr reçoit le rôle dba (GRANT DBA TO hr) pour simplifier. Le répertoire spécifié sera le seul utilisé pour l'export et l'import.
+
+4. Exporter avec expdp
+
+On exporte un schéma avec expdp, uniquement depuis le terminal : expdp hr/hr@orcl directory=dumps dumpfile=test_exp_jan.dmp. Syntaxe : expdp utilisateur[/mot_de_passe]@identifiant_connexion DIRECTORY=objet_répertoire DUMPFILE=nom_fichier.dmp. L'export contient les tables, vues, index, rôles, liens de base de données et autres objets du schéma ; on voit le détail pendant l'export. Les options courantes sont SCHEMAS, LOGFILE, FULL=Y (export complet), PARALLEL.
+
+Pour exporter une base complète non-CDB : expdp system@PRODDB FULL=Y DUMPFILE=proddb.dmp. Avec une PDB, on utilise le nom de service de la PDB pour exporter depuis ou importer dans cette PDB.
+
+Pour un export chiffré quand les données sont sensibles : expdp hr/hr@prod schemas=hr directory=dumps dumpfile=fichier.dmp logfile=fichier.log encryption=all encryption_password=mot_de_passe. Il faudra ce mot de passe pour déchiffrer à l'import.
+
+5. Importer avec impdp et le remappage
+
+Un fichier créé par expdp ne peut être importé qu'avec impdp. Pour importer l'export de l'utilisateur hr dans un autre utilisateur, il faut d'abord créer cet utilisateur et lui accorder les privilèges nécessaires, puis : impdp ahmed/ahmed@prod directory=dumps dumpfile=test_exp_jan.dmp remap_schema=hr:ahmed logfile=import.log. L'option REMAP_SCHEMA=schéma_source:schéma_cible mappe le schéma du fichier d'export vers le schéma cible.
+
+Data Pump Import peut aussi transformer les objets pendant l'import : REMAP_DATAFILE (fichiers de données), REMAP_TABLESPACE (tablespaces), REMAP_SCHEMA (schémas), REMAP_TABLE (tables), REMAP_DATA (données) et REMAP_DIRECTORY (répertoires).
+
+6. Modes d'export : tablespaces et bases transportables
+
+Les modes d'export et d'import de Data Pump incluent les modes classiques (table, schéma, tablespace, base complète) et deux modes de transport : le tablespace transportable (on déplace les fichiers de données d'un tablespace entre bases et on transfère les métadonnées avec Data Pump) et la base transportable (on transporte une base entière avec ses fichiers de données ou des jeux de sauvegarde). Le transport par sauvegarde inter-plateformes demande de déplacer les jeux de sauvegarde et l'export Data Pump, de se connecter à l'hôte de destination en tant que TARGET, puis de restaurer la sauvegarde avec RESTORE et l'export, après une conversion éventuelle des fichiers de données.
+
+7. L'export/import classique (exp et imp)
+
+L'export classique avec exp ne nécessite pas d'objet répertoire : on précise le chemin directement dans la commande. Syntaxe : exp utilisateur/mot_de_passe file=sauvegarde.dmp log=sauvegarde.log, par exemple exp hr/hr file=/home/oracle/dump2/backup2.dmp log=/home/oracle/dump2/backup2.log. L'import classique se fait avec imp userid=ahmed/ahmed full=y file='/home/oracle/dump2/backup2.dmp' ; il ne fonctionne qu'avec des fichiers produits par la commande exp. Les deux types de sauvegarde produisent un fichier dump d'extension .dmp, mais ils ne sont pas interchangeables : expdp va avec impdp, et exp avec imp.
+
+8. SQL*Loader : charger des données depuis des fichiers
+
+SQL*Loader permet de charger des données provenant d'une base non Oracle ou de fichiers utilisateur dans une table Oracle. Il utilise un fichier de contrôle (control file) qui indique l'emplacement des données à charger (INFILE), les fichiers de rejet (BADFILE) et d'exclusion (DISCARDFILE), la gestion de la mémoire, la gestion des chargements interrompus, et les détails de manipulation des données (positions des champs, conversions, traitement des valeurs vides avec NULLIF, séparateurs TERMINATED BY).
+
+9. Méthodes de chargement : chemin conventionnel et chemin direct
+
+Le chargement conventionnel (conventional path) : génère toujours des enregistrements redo, applique toutes les contraintes, déclenche les triggers INSERT, peut charger des tables en cluster, permet aux autres utilisateurs de modifier les tables pendant le chargement et met à jour les index à chaque insertion.
+
+Le chargement en chemin direct (direct path) : utilise des sauvegardes de données (data saves), ce qui est plus rapide ; ne génère du redo que dans certaines conditions ; n'applique que les contraintes PRIMARY KEY, UNIQUE et NOT NULL ; ne déclenche pas les triggers INSERT ; ne charge pas dans des clusters ; empêche les autres utilisateurs de modifier la table pendant le chargement et fusionne les nouvelles entrées d'index à la fin du chargement. Le paramètre ROWS précise quand une sauvegarde de données (data save) doit avoir lieu pendant un chargement direct, pour se protéger contre la perte de données due à une défaillance d'instance.
+
+10. Le mode express de SQL*Loader
+
+Le mode express charge une table sans écrire de fichier de contrôle : sqlldr system@PDBC TABLE=hr.emp. Il suffit de spécifier le nom de la table. Les colonnes de la table doivent être de types scalaires (caractère, nombre ou date/heure), le fichier de données ne peut contenir que des données de type caractère délimitées, et SQL*Loader utilise les définitions de colonnes de la table pour déterminer les types des données d'entrée. On vérifie le résultat dans les fichiers journaux (log files).
+
+11. Tables externes
+
+Les tables externes permettent de déplacer des données via des fichiers indépendants de la plateforme : la table est définie dans la base mais ses données restent dans des fichiers du système d'exploitation, que l'on interroge avec SQL, par exemple pour charger ou décharger des données.

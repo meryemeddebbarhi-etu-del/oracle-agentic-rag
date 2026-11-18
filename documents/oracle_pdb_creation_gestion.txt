@@ -1,0 +1,60 @@
+Oracle 19c multitenant : créer, cloner et gérer les PDB
+
+1. Techniques de création d'une PDB
+
+Il existe plusieurs façons de créer (provisionner) une nouvelle base pluggable :
+- créer une nouvelle PDB à partir de la PDB seed (PDB$SEED) ;
+- cloner une PDB à partir d'une autre PDB, locale ou distante (dans un autre CDB), à chaud (hot) ou à froid (cold) ;
+- brancher (plug) une PDB débranchée (unplugged) dans le même CDB ou dans un autre ;
+- brancher une base non-CDB dans un CDB ;
+- déplacer (relocate) une PDB d'un CDB vers un autre ;
+- créer une PDB proxy qui référence une autre PDB.
+On peut utiliser SQL*Plus, SQL Developer, Enterprise Manager Cloud Control, EM Database Express ou DBCA.
+
+2. Créer une PDB à partir de PDB$SEED
+
+La création d'une PDB à partir du seed copie les fichiers de données de PDB$SEED, crée les tablespaces SYSTEM, SYSAUX et UNDO, crée un catalogue complet avec les métadonnées pointant vers les objets fournis par Oracle, crée les utilisateurs communs SYS et SYSTEM, crée un utilisateur local administrateur de la PDB (PDBA) auquel est accordé le rôle local PDB_DBA, et crée un nouveau service par défaut.
+
+On se connecte à la root du CDB avec un utilisateur commun disposant du privilège système CREATE PLUGGABLE DATABASE, puis :
+
+CREATE PLUGGABLE DATABASE pdb1
+  ADMIN USER admin1 IDENTIFIED BY p1 ROLES=(CONNECT)
+  FILE_NAME_CONVERT = ('répertoire_seed', 'répertoire_pdb1');
+
+On vérifie avec les vues cdb_pdbs, cdb_tablespaces et cdb_data_files. Le statut de la nouvelle PDB est NEW. On l'ouvre ensuite avec ALTER PLUGGABLE DATABASE pdb1 OPEN RESTRICTED, puis on se connecte avec CONNECT sys@pdb1 AS SYSDBA ou CONNECT admin1@pdb1.
+
+Pour indiquer où placer les fichiers de la nouvelle PDB, on peut utiliser FILE_NAME_CONVERT, ou OMF (le paramètre DB_CREATE_FILE_DEST, ou la clause CREATE_FILE_DEST dans la commande), ou le paramètre d'initialisation PDB_FILE_NAME_CONVERT.
+
+3. Cloner une PDB
+
+Pour cloner une PDB locale, par exemple créer PDB3 à partir de PDB1 : 1) se connecter à la root du CDB pour fermer PDB1 (clone à froid) ; 2) exécuter CREATE PLUGGABLE DATABASE pdb3 FROM pdb1 en définissant l'emplacement des fichiers de données ; 3) ouvrir PDB3 en lecture-écriture (read write). Un clone à chaud (la source reste ouverte) exige que le CDB soit en mode ARCHIVELOG et utilise le mode local undo.
+
+Pour cloner une PDB distante d'un autre CDB, on crée un lien de base de données (database link) vers le CDB distant et on exécute CREATE PLUGGABLE DATABASE ... FROM pdb1@lien. Les étapes décrites sont : créer un utilisateur commun avec les privilèges dans le CDB distant, vérifier que la PDB source est fermée ou en lecture seule, passer le mode undo partagé en mode undo local dans les deux CDB, mettre les deux CDB en ARCHIVELOG pour un clone à chaud, accorder SYSOPER à l'utilisateur connecté, puis ouvrir le clone en lecture seule ou lecture-écriture.
+
+4. Brancher une PDB débranchée ou une base non-CDB
+
+On débranche (unplug) une PDB en la fermant et en générant un fichier XML de description, puis on la rebranche dans un autre CDB avec CREATE PLUGGABLE DATABASE ... USING 'fichier.xml'. Pour intégrer une base non-CDB (par exemple ORCL) comme PDB : 1) ouvrir ORCL en lecture seule (READ ONLY) ; 2) se connecter au CDB cible pour créer le lien de base de données ; 3) brancher la base non-CDB débranchée comme PDB2 ; 4) exécuter le script noncdb_to_pdb.sql dans la PDB ; 5) ouvrir la PDB en lecture-écriture. On peut aussi cloner la non-CDB à travers un lien de base de données.
+
+5. Changer le mode d'une PDB
+
+Après avoir fermé une PDB, on peut l'ouvrir en mode lecture-écriture restreint (OPEN RESTRICTED, accessible aux seuls utilisateurs ayant le privilège RESTRICTED SESSION) ou en lecture seule (par exemple ALTER PLUGGABLE DATABASE ALL OPEN READ ONLY depuis la root). La vue V$PDBS affiche pour chaque PDB son nom, son mode d'ouverture (OPEN_MODE) et si elle est restreinte (RESTRICTED).
+
+6. Modifier les paramètres d'une PDB
+
+- Mettre un fichier de données de la PDB en ligne : ALTER PLUGGABLE DATABASE DATAFILE '/u03/pdb1_01.dbf' ONLINE.
+- Changer le tablespace permanent par défaut : ALTER PLUGGABLE DATABASE DEFAULT TABLESPACE pdb1_tbs.
+- Changer le tablespace temporaire par défaut : ALTER PLUGGABLE DATABASE DEFAULT TEMPORARY TABLESPACE temp_tbs.
+- Limiter l'espace de stockage de la PDB : ALTER PLUGGABLE DATABASE STORAGE (MAXSIZE 2G).
+- Changer le nom global : ALTER PLUGGABLE DATABASE RENAME GLOBAL_NAME TO pdbAPP1.
+
+7. Paramètres d'initialisation et ALTER SYSTEM dans une PDB
+
+Il n'existe qu'un seul fichier de paramètres serveur (SPFILE) par CDB. Une PDB ne peut changer un paramètre que si ISPDB_MODIFIABLE vaut TRUE dans V$SYSTEM_PARAMETER ; la valeur est alors chargée en mémoire après la fermeture et la réouverture de la PDB et stockée dans le dictionnaire après l'arrêt du CDB. Exemple : ALTER SYSTEM SET ddl_lock_timeout=20 SCOPE=BOTH exécuté dans une PDB ne change que le paramètre de cette PDB.
+
+Certaines instructions ALTER SYSTEM exécutées dans une PDB n'affectent que cette PDB : FLUSH SHARED_POOL, FLUSH BUFFER_CACHE, ENABLE/DISABLE RESTRICTED SESSION, KILL SESSION et SET paramètre. ALTER SYSTEM CHECKPOINT peut être exécuté dans une PDB mais affecte tous les fichiers de données du CDB, sauf ceux en lecture seule ou hors ligne. Toutes les autres instructions ALTER SYSTEM (par exemple ALTER SYSTEM SWITCH LOGFILE) affectent le CDB entier et doivent être exécutées par un utilisateur commun dans la root ; sinon l'erreur « Operation not allowed from within a pluggable database » apparaît.
+
+Le nom d'hôte et le numéro de port d'une PDB (ALTER PLUGGABLE DATABASE CONTAINERS HOST = ... et CONTAINERS PORT = ...) ne comptent que si des PDB proxy la référencent ; on peut les réinitialiser avec RESET.
+
+8. Supprimer une PDB
+
+La commande DROP PLUGGABLE DATABASE supprime une PDB. La PDB seed ne peut pas être supprimée. La suppression met à jour les fichiers de contrôle et soit supprime les fichiers de données de la PDB (INCLUDING DATAFILES), soit les conserve (KEEP DATAFILES, option par défaut). Une PDB source relocalisée est supprimée automatiquement quand la PDB relocalisée est ouverte en lecture-écriture. Après la suppression d'une PDB, une connexion à son service échoue, par exemple avec l'erreur ORA-12514 : le service n'est plus enregistré auprès du listener.

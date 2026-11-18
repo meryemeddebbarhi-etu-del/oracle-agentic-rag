@@ -45,6 +45,21 @@ def generate_answer(
     return texte
 
 
+def _garder_sources_citees(sources: list[dict[str, Any]], answer: str) -> list[dict[str, Any]]:
+    """Si la réponse cite explicitement des documents (format [source : fichier]),
+    on n'affiche que ceux-là : les autres passages récupérés par la recherche
+    mais non utilisés par la réponse ne sont pas de vraies sources. Si aucun
+    document n'est cité dans le texte, on garde toute la liste."""
+    if not sources or not answer:
+        return sources
+    texte = answer.lower()
+    citees = [
+        s for s in sources
+        if s.get("document_id") and str(s["document_id"]).lower() in texte
+    ]
+    return citees or sources
+
+
 def build_response_payload(
     *,
     question: str,
@@ -73,11 +88,17 @@ def build_response_payload(
         no_answer = detect_no_answer(results) if results is not None else True
     if ambiguous is None:
         ambiguous = detect_ambiguous(results) if results else False
+    if no_answer:
+        ambiguous = False  # une absence de réponse n'est pas une ambiguïté
+
+    # Pas de sources affichées quand aucune réponse n'a été trouvée.
+    sources = [] if no_answer or not results else collect_sources(results)
+    sources = _garder_sources_citees(sources, answer)
 
     return {
         "question": question,
         "answer": answer,
-        "sources": collect_sources(results) if results else [],
+        "sources": sources,
         "search_method": search_method,
         "no_answer_found": bool(no_answer),
         "ambiguous": bool(ambiguous),

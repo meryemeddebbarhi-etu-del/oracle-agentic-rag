@@ -1,0 +1,83 @@
+PL/SQL : créer et utiliser des packages
+
+1. Présentation des packages PL/SQL
+
+Un package PL/SQL regroupe des composants liés logiquement : types PL/SQL, variables, structures de données, exceptions, curseurs et sous-programmes (procédures et fonctions). Un package est constitué de deux parties : une spécification et un corps. Il permet au serveur Oracle de lire simultanément plusieurs objets en mémoire, ce qui améliore les performances.
+
+2. La spécification et le corps
+
+- La spécification (ou en-tête) est l'interface publique du package. Elle déclare les types, les variables, les constantes, les exceptions, les curseurs et les en-têtes des sous-programmes qui peuvent être utilisés depuis l'extérieur.
+- Le corps contient l'implémentation : le code des sous-programmes déclarés dans la spécification, ainsi que des composants privés. Il est facultatif si la spécification ne déclare que des constantes, variables ou types.
+
+3. Visibilité des composants d'un package : public et privé
+
+Toutes les structures déclarées dans la spécification d'un package sont publiques : elles sont visibles par les utilisateurs disposant de privilèges sur le package. Les identificateurs définis uniquement dans le corps du package sont privés et ne sont pas visibles à l'extérieur du corps. Toutes les structures privées doivent être déclarées avant d'être référencées. Les structures publiques sont visibles par le corps du package.
+
+4. Développer des packages
+
+Les étapes sont les suivantes : édition du code de la spécification et du corps, chargement, puis création (compilation et stockage) de la spécification et du corps. La commande SHOW ERRORS affiche les erreurs de compilation.
+
+5. Créer la spécification du package
+
+CREATE [OR REPLACE] PACKAGE nom_package IS | AS
+  déclarations publiques de types et de variables
+  spécifications des sous-programmes
+END [nom_package];
+
+L'option OR REPLACE supprime et recrée la spécification du package. Par défaut, la valeur NULL est affectée aux variables déclarées dans la spécification, sauf si elles sont initialisées. Exemple :
+
+CREATE OR REPLACE PACKAGE comm_pkg IS
+  std_comm NUMBER := 0.10;   -- initialisée à 0.10
+  PROCEDURE reset_comm(new_comm NUMBER);
+END comm_pkg;
+
+STD_COMM est une variable globale initialisée à 0,10. RESET_COMM est une procédure publique utilisée pour réinitialiser la commission standard en fonction de certaines règles ; elle est implémentée dans le corps du package.
+
+6. Créer le corps du package
+
+CREATE [OR REPLACE] PACKAGE BODY nom_package IS | AS
+  déclarations privées de types et de variables
+  corps des sous-programmes
+[BEGIN
+  instructions d'initialisation]
+END [nom_package];
+
+L'option OR REPLACE supprime et recrée le corps du package. Exemple de corps pour comm_pkg :
+
+CREATE OR REPLACE PACKAGE BODY comm_pkg IS
+  FUNCTION validate(comm NUMBER) RETURN BOOLEAN IS
+    max_comm employees.commission_pct%TYPE;
+  BEGIN
+    SELECT MAX(commission_pct) INTO max_comm FROM employees;
+    RETURN (comm BETWEEN 0.0 AND max_comm);
+  END validate;
+
+  PROCEDURE reset_comm(new_comm NUMBER) IS
+  BEGIN
+    IF validate(new_comm) THEN
+      std_comm := new_comm;           -- modifie la variable publique
+    ELSE
+      RAISE_APPLICATION_ERROR(-20210, 'Bad Commission');
+    END IF;
+  END reset_comm;
+END comm_pkg;
+
+Ici la fonction validate est privée : elle n'est pas déclarée dans la spécification, donc seule la procédure reset_comm du même package peut l'appeler. La section BEGIN finale du corps, optionnelle, sert à initialiser le package une seule fois, à la première utilisation.
+
+7. Appeler des sous-programmes de package
+
+- Dans le même package, on appelle directement le sous-programme par son nom (par exemple validate(new_comm) depuis reset_comm).
+- Depuis SQL*Plus : EXECUTE comm_pkg.reset_comm(0.15). On préfixe le nom du sous-programme par le nom du package.
+- Dans un autre schéma : EXECUTE scott.comm_pkg.reset_comm(0.15).
+
+8. Packages sans corps
+
+Un package peut ne contenir qu'une spécification, sans corps, quand il ne déclare que des variables, constantes, types ou exceptions. Exemple : global_consts, qui déclare des constantes de conversion de longueur (mile_2_kilo := 1.6093, kilo_2_mile := 0.6214, yard_2_meter := 0.9144, meter_2_yard := 1.0936). On les utilise directement : 20 * global_consts.mile_2_kilo donne 20 miles en kilomètres. Une fonction peut les réutiliser, par exemple mtr2yrd(m NUMBER) RETURN m * global_consts.meter_2_yard.
+
+9. Supprimer et consulter des packages
+
+DROP PACKAGE nom_package supprime à la fois la spécification et le corps. DROP PACKAGE BODY nom_package supprime uniquement le corps et conserve la spécification. Le code source des packages PL/SQL est stocké et peut être consulté dans les vues USER_SOURCE et ALL_SOURCE du dictionnaire de données : on filtre sur le type PACKAGE pour afficher la spécification et sur PACKAGE BODY pour afficher le corps.
+
+10. Avantages des packages
+
+Les packages offrent une meilleure organisation du code en regroupant les composants liés, l'encapsulation (les détails d'implémentation restent privés), la facilité de maintenance, la sécurité (on accorde l'accès au package plutôt qu'à chaque objet) et de meilleures performances car le package entier est chargé en mémoire à la première utilisation.

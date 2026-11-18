@@ -1,0 +1,54 @@
+Oracle Net Services : connexion, listener et méthodes de nommage
+
+1. Vue d'ensemble d'Oracle Net Services
+
+Oracle Net Services permet à un client ou à une couche intermédiaire de se connecter à l'instance d'une base de données. Une connexion (connection) est la communication entre un processus utilisateur et une instance ; une session représente l'état de la connexion courante d'un utilisateur à l'instance. Côté serveur, un processus serveur (server process) exécute les ordres SQL de la session. Les fichiers de configuration d'Oracle Net existent côté client et côté serveur et se trouvent dans <ORACLE_HOME>/network/admin.
+
+2. Les composants d'Oracle Net
+
+- Le listener (listener.ora) : processus qui réside sur le serveur et écoute les demandes de connexion entrantes des clients, puis gère le trafic vers le serveur.
+- Les méthodes de nommage (naming methods) : méthode de résolution utilisée par une application cliente pour résoudre un identifiant de connexion en descripteur de connexion.
+- Le nom de service réseau (net service name) : nom simple, appelé identifiant de connexion, qui se résout en un descripteur de connexion identifiant l'emplacement réseau et le service ; il est défini dans le fichier tnsnames.ora pour la configuration locale.
+- Les profils (sqlnet.ora) : ensemble de paramètres qui règlent les préférences d'activation et de configuration des fonctions Oracle Net côté client ou serveur.
+Les outils de configuration sont Enterprise Manager Cloud Control, Oracle Net Manager (netmgr), Oracle Net Configuration Assistant (netca) et l'utilitaire Listener Control (lsnrctl).
+
+3. Le listener par défaut
+
+À la création d'une base Oracle, l'assistant Net Configuration Assistant crée un listener local nommé LISTENER. Il est automatiquement alimenté avec les services de base de données disponibles grâce à l'enregistrement dynamique des services (dynamic service registration). LISTENER écoute sur l'adresse de protocole TCP/IP (PROTOCOL=tcp)(HOST=nom_hôte)(PORT=1521). Sans aucune configuration, on peut accéder immédiatement à l'instance par LISTENER. Si le nom du listener est LISTENER et qu'il n'est pas résolu, le protocole TCP/IP et le port 1521 sont supposés.
+
+4. Dédié ou partagé : serveur dédié et serveur partagé
+
+Dans une configuration de serveur dédié (dedicated server), un processus serveur est créé pour chaque client. Dans une configuration de serveur partagé (shared server), un pool de processus serveur est partagé par plusieurs clients et les demandes passent par des répartiteurs (dispatchers). Le serveur partagé réduit le nombre de processus quand il y a beaucoup de clients peu actifs.
+
+5. Établir une connexion réseau
+
+Pour établir une connexion, Oracle Net exige que le client connaisse : l'hôte où le listener s'exécute, le port que le listener surveille, le protocole utilisé par le listener et le nom du service que le listener gère. Le processus est le suivant : le client envoie une demande de connexion au listener ; le listener, qui a connaissance du service demandé, crée ou affecte un processus serveur ; la session utilisateur est établie entre le processus utilisateur et le processus serveur, et le listener n'intervient plus. Exemple : CONNECT jsmith/jspass@finflowers ; l'identifiant finflowers est résolu en (ADDRESS=(PROTOCOL=tcp)(HOST=flowers-server)(PORT=1521)) et (CONNECT_DATA=(SERVICE_NAME=finance.us.flowers.com)).
+
+6. Les méthodes de nommage
+
+Oracle Net prend en charge plusieurs méthodes pour résoudre les informations de connexion :
+- Easy Connect (nommage simple) : utilise une chaîne de connexion TCP/IP du type CONNECT hr/hr@db.us.oracle.com:1521/dba11g. Il est activé par défaut, ne demande aucune configuration côté client, ne prend en charge que TCP/IP (pas SSL) et ne supporte pas les options avancées comme le basculement à la connexion (connect-time failover), le routage de source (source routing) et l'équilibrage de charge (load balancing).
+- Nommage local (local naming) : utilise un fichier de configuration local, tnsnames.ora, côté client. Il prend en charge tous les protocoles Oracle Net et les options avancées. Exemple : CONNECT hr/hr@orcl.
+- Nommage par annuaire (directory naming) : utilise un serveur d'annuaire centralisé compatible LDAP (Oracle Internet Directory, Microsoft Active Directory Services) contenant les informations de résolution de noms. Il prend en charge tous les protocoles et les options avancées.
+
+7. Les services de base de données
+
+Les services de base de données (database services) permettent de gérer les charges de travail. On crée un service avec le package DBMS_SERVICE.CREATE_SERVICE, par exemple un service sales.us.flowers.com. Chaque PDB possède son propre service par défaut.
+
+8. Enregistrement dynamique des services
+
+Par défaut, une instance est configurée pour l'enregistrement dynamique des services : elle déclare automatiquement ses services disponibles aux listeners. Le processus LREG (Listener Registration) de l'instance interroge périodiquement les listeners et, s'ils sont en cours d'exécution, leur enregistre les informations de service. L'enregistrement dynamique enregistre par défaut tous les services des PDB auprès du même listener : si l'on arrête ce listener, on arrête l'accès à tous les services des PDB.
+
+Étapes générales : vérifier que les paramètres d'initialisation INSTANCE_NAME, LOCAL_LISTENER, REMOTE_LISTENER et SERVICE_NAMES sont correctement configurés ; configurer les adresses de protocole (end points) dans le fichier tnsnames.ora côté serveur ; utiliser ALTER SYSTEM REGISTER pour lancer l'enregistrement immédiatement après le démarrage du listener.
+
+9. Enregistrement statique des services
+
+L'enregistrement statique configure manuellement les informations de service du listener. Il peut être nécessaire pour certains services, comme les procédures externes et les services hétérogènes (pour les systèmes non Oracle). On peut créer un listener pour une PDB particulière. Avec l'enregistrement statique, le listener ne sait pas si ses services existent réellement : il sait seulement qu'il les prend en charge, et l'utilitaire Listener Control affiche leur statut comme UNKNOWN. Pour le configurer, on définit le listener et ses adresses de protocole dans listener.ora et on ajoute une section SID_LIST_<nom_du_listener> qui liste les services de base de données.
+
+10. Administrer le listener
+
+Les commandes de l'utilitaire lsnrctl sont : lsnrctl start (démarrer le listener), lsnrctl stop (l'arrêter), lsnrctl status (afficher son état, ses adresses d'écoute et la liste des services enregistrés) et lsnrctl reload. Pour changer le port par défaut du listener : arrêter le listener avec lsnrctl stop, modifier le port dans listener.ora (et le tnsnames.ora correspondant), puis redémarrer avec lsnrctl start. On peut aussi le faire avec netca (option « reconfigurer ») depuis une machine disposant de Java. Si la base n'est pas déclarée sur le nouveau port, il faut redémarrer le listener, puis arrêter et redémarrer la base (SHUTDOWN IMMEDIATE, STARTUP) ou utiliser ALTER SYSTEM REGISTER. Pour avoir plusieurs listeners (par exemple pour plusieurs interfaces réseau), on les crée avec netmgr en leur donnant un nom et un port propres, puis on les démarre par lsnrctl start nom_listener.
+
+11. Diagnostic : « Service not registered with the listener » (ORA-12514)
+
+Si lsnrctl status affiche « The listener supports no services » (le listener ne prend en charge aucun service), cela signifie qu'aucune instance ne s'est enregistrée : l'instance est arrêtée (idle instance) ou la PDB n'est pas ouverte. Une connexion à ce moment échoue avec une erreur du type ORA-12514 ou DPY-6001 (« Service ... is not registered with the listener »). La procédure de correction est : se connecter en tant que sysdba, démarrer l'instance avec STARTUP, ouvrir les PDB avec ALTER PLUGGABLE DATABASE ALL OPEN, enregistrer leur état avec ALTER PLUGGABLE DATABASE ALL SAVE STATE, forcer l'enregistrement avec ALTER SYSTEM REGISTER, puis vérifier avec lsnrctl status que le nom du service de la PDB apparaît. Il faut aussi vérifier que le nom de service utilisé dans la chaîne de connexion correspond à celui affiché par le listener.

@@ -1,0 +1,78 @@
+PL/SQL : créer des fonctions stockées
+
+1. Présentation des fonctions stockées
+
+Une fonction est un bloc PL/SQL nommé qui renvoie une valeur. Elle peut être stockée dans la base de données en tant qu'objet de schéma en vue d'exécutions répétées. Elle est appelée dans le cadre d'une expression ou utilisée pour fournir une valeur pour un paramètre. Une fonction accepte comme une procédure des paramètres optionnels, mais elle doit retourner une valeur d'un certain type.
+
+2. Syntaxe de création d'une fonction
+
+Le bloc PL/SQL d'une fonction doit comporter au moins une instruction RETURN. La clause RETURN de l'en-tête indique le type de donnée de la valeur renvoyée.
+
+CREATE [OR REPLACE] FUNCTION nom_fonction
+  [(parametre1 [mode1] type1, parametre2 [mode2] type2, ...)]
+RETURN type_retour IS | AS
+  [declarations_de_variables_locales;]
+BEGIN
+  -- instructions
+  RETURN expression;
+END [nom_fonction];
+
+Le développement d'une fonction suit les mêmes étapes que celui d'une procédure : édition du code, chargement, puis création (compilation et stockage dans la base). La commande SHOW ERRORS affiche les erreurs de compilation.
+
+3. Exemple de fonction stockée
+
+CREATE OR REPLACE FUNCTION get_sal
+  (id employees.employee_id%TYPE) RETURN NUMBER IS
+  sal employees.salary%TYPE := 0;
+BEGIN
+  SELECT salary INTO sal
+  FROM employees
+  WHERE employee_id = id;
+  RETURN sal;
+END get_sal;
+/
+
+Cette fonction reçoit l'identifiant d'un employé et renvoie son salaire. On l'appelle en tant qu'expression ou valeur de paramètre : EXECUTE dbms_output.put_line(get_sal(100)).
+
+4. Méthodes d'exécution des fonctions
+
+Il existe plusieurs façons d'appeler une fonction :
+- dans une expression PL/SQL, en utilisant une variable hôte pour obtenir le résultat (VARIABLE salary NUMBER puis EXECUTE :salary := get_sal(100)) ;
+- dans une expression PL/SQL, en utilisant une variable locale (sal := get_sal(100);) ;
+- en tant que paramètre d'un autre sous-programme (EXECUTE dbms_output.put_line(get_sal(100))) ;
+- dans une instruction SQL, sous certaines conditions (SELECT job_id, get_sal(employee_id) FROM employees;).
+
+5. Avantages des fonctions définies par l'utilisateur dans les instructions SQL
+
+Les fonctions définies par l'utilisateur peuvent compléter le langage SQL en réalisant des opérations trop complexes, malaisées, voire impossibles en SQL pur. Utilisées dans la clause WHERE pour filtrer des données, elles peuvent s'avérer plus efficaces qu'un filtrage au sein de l'application. Elles permettent aussi la manipulation de données.
+
+Les fonctions définies par l'utilisateur jouent le rôle de fonctions monolignes intégrées et peuvent être utilisées dans : la liste ou la clause SELECT d'une interrogation, les expressions conditionnelles des clauses WHERE et HAVING, les clauses CONNECT BY, START WITH, ORDER BY et GROUP BY, la clause VALUES de l'instruction INSERT et la clause SET de l'instruction UPDATE.
+
+Exemple : la fonction tax(value IN NUMBER) RETURN NUMBER renvoie value * 0.08. On l'utilise ainsi : SELECT employee_id, last_name, salary, tax(salary) FROM employees WHERE department_id = 100;
+
+6. Restrictions relatives aux appels depuis des expressions SQL
+
+Pour pouvoir être appelées depuis une expression SQL, les fonctions définies par l'utilisateur doivent :
+- être stockées dans la base de données ;
+- accepter uniquement des paramètres IN, avec des types de données SQL valides (et non des types propres à PL/SQL comme BOOLEAN) ;
+- renvoyer des types de données SQL valides ;
+- recevoir leurs paramètres en notation positionnelle (pas d'association de noms avec =>) ;
+- être la propriété de l'utilisateur appelant, ou il faut disposer du privilège EXECUTE sur la fonction.
+
+7. Effets de bord : ce qu'une fonction appelée depuis SQL n'a pas le droit de faire
+
+Pour contrôler les effets de bord, les restrictions suivantes s'appliquent :
+- une fonction appelée depuis une instruction SELECT ne peut pas contenir d'instructions LMD (INSERT, UPDATE, DELETE) ;
+- une fonction appelée depuis une instruction UPDATE ou DELETE sur une table T ne peut pas contenir d'interrogations ni d'instructions LMD sur la même table T ;
+- une fonction appelée depuis une instruction SQL ne peut pas terminer une transaction : elle ne peut pas exécuter COMMIT ni ROLLBACK.
+Les appels qui ne respectent pas ces restrictions sont refusés au moment de l'exécution. Par exemple, une fonction dml_call_sql qui insère une ligne dans employees, appelée dans un UPDATE de la table employees, provoque l'erreur ORA-04091 : la table est en cours de modification (mutating), le déclencheur ou la fonction ne peut pas la lire.
+
+8. Supprimer et consulter des fonctions
+
+On supprime une fonction stockée avec DROP FUNCTION nom_fonction ; par exemple DROP FUNCTION get_sal. Tous les privilèges accordés sur une fonction sont alors révoqués. Les informations sur les fonctions sont stockées dans le dictionnaire de données : on affiche le code source dans USER_SOURCE pour les sous-programmes dont on est propriétaire, ou dans ALL_SOURCE pour les fonctions appartenant à d'autres utilisateurs qui ont accordé le privilège EXECUTE.
+
+9. Différence entre une procédure et une fonction
+
+- Une procédure exécute une action ; elle est appelée comme une instruction PL/SQL (EXECUTE nom_procedure(...)). Elle peut renvoyer des valeurs seulement par ses paramètres OUT ou IN OUT.
+- Une fonction renvoie obligatoirement une valeur grâce à RETURN et se déclare avec la clause RETURN type. Elle est appelée dans une expression : PL/SQL ou SQL.
+- Une procédure ne peut pas être utilisée dans une instruction SELECT, alors qu'une fonction respectant les restrictions ci-dessus le peut.

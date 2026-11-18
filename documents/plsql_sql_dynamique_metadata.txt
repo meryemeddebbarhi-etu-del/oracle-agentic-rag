@@ -1,0 +1,66 @@
+PL/SQL : SQL dynamique et package DBMS_METADATA
+
+1. Flux d'exécution du code SQL
+
+Toutes les instructions SQL passent par plusieurs phases : l'analyse (parse), l'affectation de valeur aux variables attachées (bind), l'exécution et l'extraction des lignes (fetch). Certaines étapes ne concernent pas toutes les instructions : par exemple la phase d'extraction ne s'applique qu'aux interrogations. Pour les instructions SQL intégrées (SELECT, instructions LMD, COMMIT et ROLLBACK), les phases d'analyse et d'affectation de valeur sont exécutées lors de la compilation. Pour les instructions SQL dynamiques, toutes les phases ont lieu lors de l'exécution.
+
+2. Qu'est-ce que le SQL dynamique
+
+Le SQL dynamique sert à créer une instruction SQL dont la structure peut évoluer dans le temps. Le code SQL dynamique est créé et stocké sous forme de chaîne de caractères dans l'application. C'est une instruction SQL dont les colonnes varient ou qui comporte différentes conditions, avec ou sans marques de réservation (variables attachées). Il permet d'écrire et d'exécuter des instructions de définition de données (LDD, comme CREATE TABLE), de contrôle des données ou de contrôle des sessions à partir du code PL/SQL. Il est exécuté avec le SQL dynamique natif (EXECUTE IMMEDIATE) ou avec le package DBMS_SQL.
+
+3. Le SQL dynamique natif : EXECUTE IMMEDIATE
+
+Le SQL dynamique natif offre une prise en charge native du code SQL dynamique directement dans le langage PL/SQL. Il permet d'exécuter des instructions SQL dont la structure est inconnue jusqu'à l'exécution. Il utilise l'instruction EXECUTE IMMEDIATE, valable pour le code SQL dynamique ou les blocs PL/SQL anonymes :
+
+EXECUTE IMMEDIATE chaine_dynamique
+  [INTO {variable [, variable] ... | enregistrement}]
+  [USING [IN | OUT | IN OUT] argument_attaché [, ...]];
+
+La clause INTO est utilisée pour les interrogations monolignes et indique les variables ou enregistrements dans lesquels les valeurs des colonnes sont extraites. La clause USING sert à fournir les arguments attachés ; le mode de paramètre par défaut est IN.
+
+4. Exemples de SQL dynamique natif
+
+Instruction LDD : créer une table dont le nom est passé en paramètre.
+
+CREATE PROCEDURE create_table(table_name VARCHAR2, col_specs VARCHAR2) IS
+BEGIN
+  EXECUTE IMMEDIATE 'CREATE TABLE ' || table_name || ' (' || col_specs || ')';
+END;
+
+Exemple d'appel : create_table('EMPLOYEE_NAMES', 'id NUMBER(4) PRIMARY KEY, name VARCHAR2(40)').
+
+Instruction LMD : supprimer les lignes d'une table et renvoyer leur nombre.
+
+CREATE FUNCTION del_rows(table_name VARCHAR2) RETURN NUMBER IS
+BEGIN
+  EXECUTE IMMEDIATE 'DELETE FROM ' || table_name;
+  RETURN SQL%ROWCOUNT;
+END;
+
+Insertion avec variables attachées : EXECUTE IMMEDIATE 'INSERT INTO ' || table_name || ' VALUES (:1, :2)' USING id, name; Les marques de réservation :1 et :2 reçoivent les valeurs listées dans USING.
+
+Interrogation monoligne : EXECUTE IMMEDIATE stmt INTO emprec USING emp_id; où stmt contient 'SELECT * FROM employees WHERE employee_id = :id'.
+
+5. Interrogation à plusieurs lignes : OPEN-FOR, FETCH et CLOSE
+
+Pour une interrogation dynamique qui ramène plusieurs lignes, on utilise une variable de curseur de type REF CURSOR avec le traitement OPEN ... FOR, FETCH puis CLOSE. Un REF CURSOR faible (weak) n'a pas de type de retour imposé : TYPE ref_ctype IS REF CURSOR. Un REF CURSOR fort (strong) impose un type de retour : TYPE emp_ref_ctype IS REF CURSOR RETURN employees%ROWTYPE. Exemple : OPEN emp_cv FOR stmt USING deptid; puis FETCH emp_cv INTO emprec; avec EXIT WHEN emp_cv%NOTFOUND; et enfin CLOSE emp_cv.
+
+6. Exécuter dynamiquement un bloc PL/SQL et compiler du code
+
+On peut exécuter dynamiquement un bloc PL/SQL anonyme avec EXECUTE IMMEDIATE et des arguments USING IN et OUT (exemple de la fonction annual_sal qui calcule emprec.salary * 12). Le SQL dynamique natif permet aussi de compiler du code PL/SQL avec l'instruction ALTER : ALTER PROCEDURE nom COMPILE, ALTER FUNCTION nom COMPILE, ALTER PACKAGE nom COMPILE SPECIFICATION et ALTER PACKAGE nom COMPILE BODY.
+
+7. Le package DBMS_SQL
+
+Le package DBMS_SQL permet d'écrire du code SQL dynamique dans des procédures stockées et d'analyser les instructions LDD. Il comprend notamment les sous-programmes OPEN_CURSOR, PARSE, BIND_VARIABLE, EXECUTE, FETCH_ROWS et CLOSE_CURSOR. Exemple de suppression de lignes : ouvrir un curseur avec DBMS_SQL.OPEN_CURSOR, analyser l'instruction avec DBMS_SQL.PARSE(csr_id, 'DELETE FROM ' || table_name, DBMS_SQL.NATIVE), l'exécuter avec DBMS_SQL.EXECUTE puis fermer le curseur avec DBMS_SQL.CLOSE_CURSOR. Pour une instruction paramétrée, DBMS_SQL.BIND_VARIABLE associe une valeur à chaque marque de réservation (:cid, :cname, :rid).
+
+8. Comparaison entre SQL dynamique natif et DBMS_SQL
+
+Le SQL dynamique natif est plus facile à utiliser que le package DBMS_SQL et nécessite moins de code. Il améliore les performances, car l'interpréteur PL/SQL offre sa prise en charge native. Il prend en charge tous les types pris en charge par le SQL statique en PL/SQL, notamment les types définis par l'utilisateur, et peut extraire des lignes directement dans des enregistrements PL/SQL. Le package DBMS_SQL reste utile quand la liste des colonnes ou des variables attachées n'est connue qu'à l'exécution.
+
+9. Le package DBMS_METADATA
+
+L'API de métadonnées DBMS_METADATA offre une fonctionnalité centralisée d'extraction, de manipulation et de resoumission des métadonnées du dictionnaire de données. Elle permet d'obtenir les métadonnées au format XML ou sous forme d'instructions LDD de création (DDL), utilisables pour recréer les objets. Le traitement implique trois étapes : 1) extraire les métadonnées d'un objet au format XML, 2) transformer le XML de différentes façons, notamment en instructions SQL LDD, 3) soumettre le XML afin de recréer l'objet.
+
+Sous-programmes principaux : OPEN indique le type d'objet à extraire et renvoie un pointeur de contexte (handle) ; SET_FILTER définit des restrictions sur les objets à extraire (par exemple le nom ou le schéma) ; ADD_TRANSFORM désigne une transformation appliquée à la représentation XML ; SET_TRANSFORM_PARAM et SET_REMAP_PARAM règlent les paramètres de la feuille de style XSLT ; CLOSE invalide le pointeur et nettoie l'état. Les fonctions FETCH_XML (XMLType), FETCH_DDL (instructions LDD dans une table imbriquée) et FETCH_CLOB (objet CLOB) renvoient les métadonnées. Il existe plus de 70 filtres, organisés par catégories (objets nommés, objets dépendant de tables, contraintes, tous les types d'objet, export de base de données).
+
+Exemple : DBMS_METADATA.SET_FILTER(handle, 'SCHEMA_EXPR', 'IN (''PAYROLL'', ''HR'')') extrait les objets des schémas PAYROLL et HR ; DBMS_METADATA.SET_FILTER(handle, 'EXCLUDE_PATH_EXPR', '=''FUNCTION''') exclut les fonctions. Avec OPEN('SCHEMA_EXPORT'), SET_FILTER(h, 'SCHEMA', 'HR'), ADD_TRANSFORM(h, 'DDL') et FETCH_DDL(h), on obtient les instructions de création des objets du schéma HR, avec par exemple SET_REMAP_PARAM(th1, 'REMAP_TABLESPACE', 'SYSTEM', 'TBS1') pour changer le tablespace.

@@ -1,0 +1,103 @@
+PL/SQL : les curseurs implicites et explicites
+
+1. Définition d'un curseur
+
+Pour traiter une commande SQL, PL/SQL ouvre une zone de contexte afin d'exécuter la commande et de stocker les informations. Le curseur permet de nommer cette zone de contexte, d'accéder aux informations et éventuellement de contrôler le traitement. Cette zone de contexte est une mémoire de taille fixe, utilisée par le noyau Oracle pour analyser et interpréter tout ordre SQL.
+
+2. Les types de curseurs
+
+- Le curseur explicite est créé et géré par l'utilisateur pour traiter un ordre SELECT qui ramène plusieurs lignes. Le traitement du SELECT se fait ligne par ligne.
+- Le curseur implicite est généré et géré par le noyau Oracle pour les autres commandes SQL (INSERT, UPDATE, DELETE et SELECT d'une seule ligne).
+
+3. Les quatre étapes d'utilisation d'un curseur explicite
+
+Pour traiter une requête qui retourne plusieurs lignes, l'utilisateur doit définir un curseur qui lui permet d'extraire la totalité des lignes sélectionnées. L'utilisation d'un curseur explicite nécessite quatre étapes : 1) la déclaration du curseur, 2) l'ouverture du curseur, 3) le traitement des lignes, 4) la fermeture du curseur.
+
+3.1 La déclaration d'un curseur
+
+Le curseur se définit dans la partie DECLARE d'un bloc PL/SQL :
+
+CURSOR nom_curseur [(nom_param type, ...)] IS commande_SELECT;
+
+Exemple : CURSOR dept_10 IS SELECT ename, sal FROM emp WHERE deptno = 10;
+
+3.2 L'ouverture et la fermeture d'un curseur
+
+L'ouverture avec OPEN nom_curseur effectue l'allocation mémoire du curseur, l'analyse sémantique et syntaxique de l'ordre SQL, et le positionnement de verrous éventuels (dans le cas d'un SELECT ... FOR UPDATE). La fermeture avec CLOSE nom_curseur libère la place mémoire réservée.
+
+3.3 Le traitement des lignes avec FETCH
+
+Il faut traiter les lignes une par une et renseigner les variables réceptrices définies dans la partie DECLARE. Après l'ouverture du curseur, l'ordre FETCH nom_curseur INTO variables (ou INTO un enregistrement) ramène une seule ligne à la fois. Il faut donc recommencer l'ordre FETCH, généralement dans une boucle, pour traiter la ligne suivante.
+
+DECLARE
+  CURSOR dept_10 IS SELECT ename, sal FROM emp WHERE deptno = 10;
+  v_nom  emp.ename%TYPE;
+  v_sal  emp.sal%TYPE;
+BEGIN
+  OPEN dept_10;
+  LOOP
+    FETCH dept_10 INTO v_nom, v_sal;
+    EXIT WHEN dept_10%NOTFOUND;
+    -- traitement de la ligne
+  END LOOP;
+  CLOSE dept_10;
+END;
+
+4. Les attributs d'un curseur
+
+Les attributs d'un curseur fournissent des informations sur l'exécution d'un ordre SQL. Ils sont conservés par PL/SQL après l'exécution du curseur, implicite ou explicite, et permettent de tester directement le résultat de l'exécution.
+
+- %FOUND : attribut booléen. Pour un curseur implicite, il est vrai si les instructions INSERT, UPDATE ou DELETE traitent au moins une ligne. Pour un curseur explicite, il est vrai si le FETCH ramène au moins une ligne.
+- %NOTFOUND : attribut booléen. Pour un curseur implicite, il est vrai si INSERT, UPDATE ou DELETE ne traitent aucune ligne. Pour un curseur explicite, il est vrai si le FETCH ne ramène plus de ligne. C'est l'attribut utilisé pour sortir d'une boucle de lecture avec EXIT WHEN nom_curseur%NOTFOUND.
+- %ISOPEN : attribut booléen. Pour un curseur implicite, il est toujours faux, car Oracle referme toujours les curseurs qu'il ouvre après chaque utilisation. Pour un curseur explicite, il est vrai si le curseur est ouvert.
+- %ROWCOUNT : attribut numérique. Pour un curseur implicite, il indique le nombre de lignes traitées par les ordres INSERT, UPDATE ou DELETE. Pour un curseur explicite, il est incrémenté à chaque ordre FETCH : il traduit donc le numéro de la n-ième ligne traitée.
+- %ROWTYPE : permet de récupérer la ligne entière du curseur dans un enregistrement au lieu de séparer les variables.
+
+Exemple avec %ROWTYPE et %ROWCOUNT, pour garder les 25 salaires les plus élevés :
+
+DECLARE
+  CURSOR c1 IS SELECT ename, empno, sal FROM emp ORDER BY sal DESC;
+  ligne c1%ROWTYPE;
+BEGIN
+  OPEN c1;
+  LOOP
+    FETCH c1 INTO ligne;
+    EXIT WHEN c1%ROWCOUNT > 25 OR c1%NOTFOUND;
+    INSERT INTO temp VALUES (ligne.sal, ligne.empno, ligne.ename);
+  END LOOP;
+  CLOSE c1;
+  COMMIT;
+END;
+
+5. Les boucles et les curseurs : FOR ... IN
+
+PL/SQL propose une structure simple et efficace pour utiliser les boucles avec les curseurs : la boucle FOR nom_enreg IN nom_curseur LOOP ... END LOOP. Le curseur est ouvert, parcouru et fermé automatiquement, sans écrire OPEN, FETCH ni CLOSE. L'enregistrement nom_enreg est déclaré implicitement et contient les colonnes du SELECT.
+
+6. Le curseur paramétré
+
+Le curseur paramétré permet d'utiliser des variables dans le curseur, principalement dans la clause WHERE. Il faut spécifier le nom et le type des paramètres dans la déclaration du curseur. Les types possibles sont CHAR, NUMBER, DATE et BOOLEAN, sans spécifier la longueur.
+
+DECLARE
+  CURSOR c1 (depart NUMBER) IS
+    SELECT sal, NVL(comm, 0) commi FROM emp WHERE deptno = depart;
+  total NUMBER(11,2) := 0;
+BEGIN
+  FOR c1_rec IN c1(20) LOOP
+    total := total + c1_rec.sal + c1_rec.commi;
+  END LOOP;
+END;
+
+7. La clause CURRENT OF
+
+La clause WHERE CURRENT OF nom_curseur permet d'accéder directement à la ligne ramenée par l'ordre FETCH afin de la traiter (UPDATE ou DELETE). Il faut d'abord se réserver la ligne lors de la déclaration du curseur en positionnant un verrou d'intention avec FOR UPDATE OF nom_colonne, puis préciser au moment du traitement que l'on veut modifier la ligne courante avec WHERE CURRENT OF.
+
+DECLARE
+  CURSOR c1 IS SELECT ename, sal FROM emp FOR UPDATE OF sal;
+BEGIN
+  FOR c1_record IN c1 LOOP
+    IF c1_record.sal > 1500 THEN
+      UPDATE emp SET sal = sal * 1.3 WHERE CURRENT OF c1;
+    END IF;
+  END LOOP;
+  COMMIT;
+END;

@@ -72,13 +72,23 @@ def collect_sources(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def detect_no_answer(results: list[dict[str, Any]], method: str | None = None) -> bool:
     """Détecte les questions sans réponse disponible dans les documents
     (point 9 du cahier des charges) : aucun résultat, ou tous les résultats
-    sont sous le seuil de pertinence de leur méthode."""
+    sont sous le seuil de pertinence de leur méthode.
+
+    Pour l'hybride réel, le score RRF ne dépend que des rangs : on juge donc
+    sur les scores d'origine (vector_score / keyword_score) gardés en metadata.
+    """
     if not results:
         return True
     for r in results:
         m = r.get("search_method", method or "hybrid")
-        seuil = _SEUILS.get(m, 0)
-        if r.get("score", 0) >= seuil:
+        meta = r.get("metadata") or {}
+        if m == "hybrid" and ("vector_score" in meta or "keyword_score" in meta):
+            if (
+                meta.get("vector_score", float("-inf")) >= _SEUILS["vector"]
+                or meta.get("keyword_score", float("-inf")) >= _SEUILS["keyword"]
+            ):
+                return False
+        elif r.get("score", 0) >= _SEUILS.get(m, 0):
             return False
     return True
 
@@ -88,13 +98,20 @@ def detect_ambiguous(results: list[dict[str, Any]]) -> bool:
     résultats proviennent de documents DIFFÉRENTS et ont un score très
     proche l'un de l'autre (on ne compare que le top-2, pas toute la liste,
     pour ne pas déclencher le signal dès qu'un corpus a naturellement
-    plusieurs scores voisins)."""
+    plusieurs scores voisins).
+
+    La méthode "hybrid" est ignorée : son score RRF ne mesure que des rangs,
+    donc deux documents différents ont toujours des scores voisins, ce qui
+    ne prouve aucune ambiguïté. Seuls vector et keyword sont jugés.
+    """
     par_methode: dict[str, list[dict[str, Any]]] = {}
     for resultat in results:
         method = resultat.get("search_method", "hybrid")
         par_methode.setdefault(method, []).append(resultat)
 
-    for resultats in par_methode.values():
+    for methode, resultats in par_methode.items():
+        if methode == "hybrid":
+            continue
         if len(resultats) < 2:
             continue
         premier, second = sorted(

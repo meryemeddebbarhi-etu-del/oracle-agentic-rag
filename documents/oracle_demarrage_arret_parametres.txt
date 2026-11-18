@@ -1,0 +1,51 @@
+Oracle 19c : démarrage et arrêt, paramètres d'initialisation et diagnostic
+
+1. Démarrer une instance : NOMOUNT, MOUNT, OPEN
+
+Le démarrage d'une instance Oracle passe par trois états successifs à partir de l'état arrêté (SHUTDOWN).
+- NOMOUNT (STARTUP NOMOUNT) : l'instance est démarrée. Oracle lit le fichier de paramètres (SPFILE ou PFILE), alloue la mémoire (SGA) et démarre les processus d'arrière-plan. Aucun fichier de la base n'est encore ouvert. C'est l'état utilisé pour créer une base avec CREATE DATABASE.
+- MOUNT (STARTUP MOUNT) : l'instance ouvre le fichier de contrôle. Les fichiers de données sont connus mais ne sont pas disponibles pour les utilisateurs. C'est l'état des opérations de maintenance comme la restauration.
+- OPEN (STARTUP) : tous les fichiers décrits par le fichier de contrôle sont ouverts, leur intégrité est vérifiée et la base est disponible pour les utilisateurs.
+La commande STARTUP seule enchaîne les trois étapes jusqu'à OPEN.
+
+2. Arrêter une instance : modes de SHUTDOWN
+
+On arrête l'instance pour modifier un paramètre statique ou appliquer un correctif. La commande SHUTDOWN existe en quatre modes :
+- NORMAL : n'accepte plus de nouvelles connexions et attend la fin de toutes les sessions en cours ; force un point de contrôle (checkpoint) et ferme les fichiers. C'est le mode le plus poli, mais aussi le plus long.
+- TRANSACTIONAL : n'accepte plus de nouvelles connexions et attend la fin des transactions en cours, puis arrête l'instance proprement.
+- IMMEDIATE : n'attend pas la fin des sessions ; annule (rollback) les transactions non validées, ferme les sessions, force un checkpoint et ferme les fichiers. C'est le mode le plus courant pour un arrêt rapide et propre.
+- ABORT : arrêt brutal, sans checkpoint ni fermeture propre des fichiers ; à utiliser seulement en dernier recours. Au redémarrage suivant, Oracle effectue une récupération d'instance automatique.
+
+3. Ouvrir et fermer les PDB
+
+Ouvrir ou fermer une PDB revient à ouvrir ou fermer ses fichiers de données. Une PDB a quatre modes d'ouverture : READ WRITE (entièrement ouverte), READ ONLY, MIGRATE et MOUNTED (fermée). On utilise la commande ALTER PLUGGABLE DATABASE, par exemple ALTER PLUGGABLE DATABASE PDB1 OPEN, ou les commandes STARTUP et SHUTDOWN dans la PDB. Avec STARTUP, la PDB doit être dans l'état MOUNTED. La commande ALTER PLUGGABLE DATABASE permet de passer de n'importe quel mode d'ouverture à un autre.
+
+Après un redémarrage du CDB, une PDB reste en général à l'état MOUNTED. Pour conserver automatiquement l'état d'une PDB après STARTUP du CDB, on exécute ALTER PLUGGABLE DATABASE pdb1 SAVE STATE ; pour l'oublier, ALTER PLUGGABLE DATABASE pdb1 DISCARD STATE.
+
+4. Les paramètres d'initialisation
+
+Les paramètres d'initialisation fixent les limites de la base, les valeurs par défaut de la base, les fichiers et répertoires, et ont une influence sur les performances. Ils sont de deux types : de base (basic) et avancés (advanced). Il suffit d'ajuster une trentaine de paramètres de base pour obtenir des performances raisonnables ; SGA_TARGET est un exemple de paramètre de base, DB_CACHE_SIZE un exemple de paramètre avancé. Les paramètres dérivés calculent leur valeur à partir d'autres : par exemple SESSIONS est dérivé de PROCESSES. Certaines valeurs dépendent du système d'exploitation, comme DB_BLOCK_SIZE.
+
+On consulte les paramètres avec la commande SHOW PARAMETER (par exemple SHOW PARAMETER para pour tous ceux dont le nom contient « para ») ou en interrogeant les vues V$PARAMETER, V$PARAMETER2, V$SPPARAMETER, V$SYSTEM_PARAMETER et V$SYSTEM_PARAMETER2.
+
+5. Modifier un paramètre
+
+On modifie les paramètres avec Enterprise Manager ou avec SQL*Plus (ALTER SESSION ou ALTER SYSTEM). La vue V$PARAMETER indique si un paramètre est modifiable au niveau session (colonne ISSES_MODIFIABLE), au niveau système (ISSYS_MODIFIABLE) ou au niveau PDB (ISPDB_MODIFIABLE). La clause SCOPE de ALTER SYSTEM précise où enregistrer la modification : MEMORY (instance en cours seulement), SPFILE (au prochain démarrage) ou BOTH (les deux). Le mot-clé DEFERRED applique la valeur aux seules sessions futures.
+
+Exemple : ALTER SYSTEM SET java_pool_size = 151M SCOPE=BOTH; puis, si le paramètre est statique, SHUTDOWN IMMEDIATE et STARTUP pour qu'il soit pris en compte. Une valeur affichée par V$PARAMETER est exprimée en octets.
+
+6. Sauvegarder et restaurer le fichier de paramètres
+
+Il n'est pas recommandé d'éditer directement le SPFILE : la base risque de ne plus démarrer. Avant de modifier un paramètre, il faut prévoir un plan de retour arrière en sauvegardant le SPFILE sous forme lisible : CREATE PFILE='/chemin/pfile.ora' FROM SPFILE;. Si la base ne démarre plus après une mauvaise modification, on arrête l'instance puis on la redémarre avec la copie sauvegardée : SHUTDOWN IMMEDIATE puis STARTUP PFILE='/chemin/pfile.ora'.
+
+7. Le journal d'alertes (alert log)
+
+L'alert log est un fichier chronologique de messages sur l'instance et la base. Il contient notamment : les paramètres non défaut utilisés au démarrage, toutes les erreurs internes (ORA-600), les erreurs de corruption de bloc (ORA-1578) et les interblocages (ORA-60), les opérations d'administration (CREATE, ALTER, DROP DATABASE et TABLESPACE, STARTUP, SHUTDOWN, ARCHIVE LOG, RECOVER), des messages liés aux processus de serveur partagé, et les erreurs de rafraîchissement automatique de vues matérialisées. On trouve son emplacement en interrogeant V$DIAG_INFO : le chemin du fichier alert_SID.log correspond à l'entrée Diag Trace, et celui de log.xml à Diag Alert. On peut le lire dans un éditeur de texte ou avec ADRCI.
+
+8. Le journal DDL, les fichiers de trace et l'ADR
+
+Le paramètre ENABLE_DDL_LOGGING=TRUE active l'enregistrement de certaines instructions DDL dans un fichier journal DDL (ddl_SID.log au format texte et log.xml au format XML), avec un enregistrement par instruction DDL. Les fichiers de trace contiennent des informations d'erreur et des informations utiles au réglage des applications ou de l'instance ; chaque processus serveur ou d'arrière-plan peut écrire dans un fichier de trace associé. Oracle Database dispose d'une infrastructure de diagnostic avancée : lors d'une erreur critique, un numéro d'incident est attribué, les données de diagnostic (fichiers de trace) sont immédiatement capturées et marquées avec ce numéro, et stockées dans l'ADR (Automatic Diagnostic Repository). Les fichiers de l'ADR peuvent être purgés automatiquement par des paramètres de politique de rétention.
+
+9. Les vues dynamiques de performance
+
+Les vues dynamiques de performance (préfixe V$) donnent accès aux informations sur les états changeants des structures mémoire de l'instance : sessions, états des fichiers, verrous (locks), progression des tâches, état des sauvegardes, utilisation et allocation de la mémoire. Elles sont alimentées en continu par l'instance et réinitialisées à chaque démarrage. Exemples : V$PARAMETER, V$DIAG_INFO, V$PDBS, V$TABLESPACE.

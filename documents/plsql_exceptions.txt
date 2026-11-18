@@ -1,0 +1,77 @@
+PL/SQL : la gestion des erreurs et des exceptions
+
+1. Le gestionnaire d'exceptions
+
+Le mécanisme de gestion d'erreurs dans PL/SQL est appelé gestionnaire des exceptions. Il permet au programmeur de planifier sa gestion des erreurs et d'abandonner ou de continuer le traitement en présence d'une erreur. Il faut affecter un traitement approprié aux erreurs apparues dans un bloc PL/SQL. Les exceptions se traitent dans la section EXCEPTION du bloc.
+
+On distingue deux types d'erreurs ou d'exceptions :
+1. L'erreur interne Oracle (le code SQLCODE est un numéro généralement négatif) : dans ce cas la main est rendue directement à l'environnement appelant si l'erreur n'est pas traitée.
+2. L'anomalie déterminée par l'utilisateur.
+
+La solution consiste à donner un nom à l'erreur (si elle n'est pas déjà prédéfinie), à définir les anomalies utilisateur en leur associant un nom, puis à définir le traitement à effectuer.
+
+2. Les erreurs système (internes)
+
+Une erreur interne est produite quand un bloc PL/SQL viole une règle d'Oracle ou dépasse une limite dépendant du système d'exploitation. Les erreurs Oracle générées par le noyau sont numérotées, alors que le gestionnaire d'exceptions de PL/SQL ne sait gérer que des erreurs nommées. C'est pourquoi PL/SQL a redéfini quelques erreurs Oracle comme des exceptions prédéfinies, dont les deux plus courantes :
+- NO_DATA_FOUND : le SELECT ... INTO ne ramène aucune ligne.
+- TOO_MANY_ROWS : le SELECT ... INTO ramène plusieurs lignes.
+
+Pour gérer d'autres erreurs Oracle, l'utilisateur doit utiliser le gestionnaire OTHERS, qui capture toutes les autres erreurs non explicitement nommées, ou la directive EXCEPTION_INIT pour associer un nom à un numéro d'erreur Oracle.
+
+DECLARE
+  wsal emp.sal%TYPE;
+BEGIN
+  SELECT sal INTO wsal FROM emp;
+EXCEPTION
+  WHEN TOO_MANY_ROWS THEN
+    -- gérer l'erreur "trop de lignes"
+  WHEN NO_DATA_FOUND THEN
+    -- gérer l'erreur "pas de ligne"
+  WHEN OTHERS THEN
+    -- gérer toutes les autres erreurs
+END;
+
+Le gestionnaire OTHERS doit toujours être placé en dernier dans la section EXCEPTION.
+
+3. Les erreurs utilisateur (externes)
+
+PL/SQL permet à l'utilisateur de définir ses propres exceptions. La gestion des anomalies utilisateur dans un bloc PL/SQL se fait en trois opérations :
+1. déclarer l'exception dans la partie DECLARE avec le type EXCEPTION ;
+2. la déclencher explicitement avec l'instruction RAISE quand l'anomalie est détectée ;
+3. la traiter dans la section EXCEPTION avec WHEN nom_exception THEN.
+
+DECLARE
+  wsal     emp.sal%TYPE;
+  sal_zero EXCEPTION;
+BEGIN
+  SELECT sal INTO wsal FROM emp WHERE empno = 5;
+  IF wsal = 0 THEN
+    RAISE sal_zero;
+  END IF;
+EXCEPTION
+  WHEN sal_zero THEN
+    -- gérer l'erreur "salaire nul"
+  WHEN TOO_MANY_ROWS THEN
+    -- gérer l'erreur "trop de lignes"
+  WHEN NO_DATA_FOUND THEN
+    -- gérer l'erreur "pas de ligne"
+  WHEN OTHERS THEN
+    -- gérer toutes les autres erreurs
+END;
+
+4. Les fonctions SQLCODE et SQLERRM
+
+Le programmeur peut utiliser les fonctions SQLCODE et SQLERRM pour coder les erreurs Oracle en exception. SQLCODE est une fonction propre à PL/SQL qui retourne le numéro (généralement négatif) de l'erreur courante. SQLERRM retourne le message associé. On les utilise surtout dans le gestionnaire WHEN OTHERS pour consigner ou afficher l'erreur réelle.
+
+5. RAISE_APPLICATION_ERROR
+
+La procédure RAISE_APPLICATION_ERROR permet de déclencher une erreur applicative avec un numéro compris entre -20000 et -20999 et un message. Elle est utilisée dans les sous-programmes stockés et les packages. Exemple de la procédure reset_comm d'un package : RAISE_APPLICATION_ERROR(-20210, 'Bad Commission') quand la commission n'est pas valide.
+
+6. Propagation des exceptions entre sous-programmes
+
+Dans le cas d'une procédure appelée par une autre : si l'exception est traitée dans la procédure appelée (section EXCEPTION avec WHEN OTHERS par exemple), la procédure appelante reprend son exécution normalement. Si l'exception n'est pas traitée dans la procédure appelée, elle est propagée à la procédure appelante ; si la procédure appelante ne la traite pas non plus, l'exécution s'arrête et l'erreur remonte jusqu'à l'environnement qui a lancé le bloc.
+
+7. Exemples d'erreurs rencontrées
+
+- ORA-04091 : table en cours de modification (mutating) ; apparaît quand une fonction appelée depuis un UPDATE lit ou modifie la même table.
+- NO_DATA_FOUND et TOO_MANY_ROWS : liées à l'usage de SELECT ... INTO.

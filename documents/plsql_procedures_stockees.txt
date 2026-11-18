@@ -1,0 +1,90 @@
+PL/SQL : créer des procédures stockées
+
+1. Définition d'une procédure
+
+Une procédure est un type de sous-programme qui exécute une action. Elle peut être stockée dans la base de données en tant qu'objet de schéma, ce qui facilite la réutilisation et la maintenance. Une procédure PL/SQL peut accepter des paramètres optionnels. Contrairement à une fonction, elle ne renvoie pas de valeur par une instruction RETURN : elle effectue un traitement (par exemple insérer, modifier ou supprimer des lignes).
+
+2. Syntaxe de création d'une procédure
+
+On utilise l'instruction CREATE PROCEDURE, suivie du nom de la procédure, d'une liste de paramètres facultative et du mot-clé IS ou AS. L'option OR REPLACE permet de remplacer une procédure existante. Le corps de la procédure est un bloc PL/SQL qui contient des déclarations locales, un mot-clé BEGIN et un mot-clé END (éventuellement suivi du nom de la procédure).
+
+CREATE [OR REPLACE] PROCEDURE nom_procedure
+  [(parametre1 [mode] type_donnees, parametre2 [mode] type_donnees, ...)]
+IS | AS
+  [declarations_de_variables_locales;]
+BEGIN
+  -- actions;
+END [nom_procedure];
+
+3. Développer des procédures
+
+Le développement d'une procédure suit trois étapes : 1) l'édition du code dans un fichier (par exemple file.sql), 2) le chargement du fichier dans l'outil (SQL*Plus ou SQL Developer), 3) la création de la procédure, c'est-à-dire sa compilation et son stockage dans la base de données. En cas d'erreur de compilation, la commande SHOW ERRORS affiche les erreurs.
+
+4. Les paramètres
+
+Les paramètres sont déclarés après le nom du sous-programme dans l'en-tête PL/SQL. Ils transmettent ou communiquent les données entre l'appelant et le sous-programme. Ils sont utilisés comme des variables locales, mais leur comportement dépend de leur mode de transmission.
+
+Il existe trois modes de paramètres :
+- IN (mode par défaut) : fournit des valeurs au sous-programme en vue de leur traitement. Le paramètre formel se comporte comme une constante ; le paramètre réel peut être un littéral, une expression, une constante ou une variable initialisée. On peut lui affecter une valeur par défaut.
+- OUT : renvoie une valeur à l'appelant. Le paramètre formel se comporte comme une variable non initialisée ; le paramètre réel doit être une variable. On ne peut pas lui affecter de valeur par défaut. Le mode doit être indiqué.
+- IN OUT : fournit une valeur d'entrée au sous-programme, qui peut être modifiée et renvoyée en sortie à l'appelant. Le paramètre réel doit être une variable. Le mode doit être indiqué.
+
+Les paramètres formels sont les variables locales déclarées dans la liste de paramètres de la spécification du sous-programme. Les paramètres réels (ou arguments) sont les variables, expressions ou valeurs littérales utilisées dans l'appel du sous-programme.
+
+Exemple de paramètres IN (augmentation de salaire) :
+
+CREATE OR REPLACE PROCEDURE raise_salary
+  (id IN employees.employee_id%TYPE, percent IN NUMBER)
+IS
+BEGIN
+  UPDATE employees
+  SET salary = salary * (1 + percent/100)
+  WHERE employee_id = id;
+END raise_salary;
+/
+EXECUTE raise_salary(176, 10)
+
+Exemple de paramètres OUT (lire le nom et le salaire d'un employé) :
+
+CREATE OR REPLACE PROCEDURE query_emp
+  (id IN employees.employee_id%TYPE,
+   name OUT employees.last_name%TYPE,
+   salary OUT employees.salary%TYPE)
+IS
+BEGIN
+  SELECT last_name, salary INTO name, salary
+  FROM employees WHERE employee_id = id;
+END query_emp;
+
+Exemple de paramètre IN OUT : la procédure format_phone reçoit un numéro de téléphone comme 8006330575 et le renvoie formaté (800)633-0575 dans la même variable.
+
+5. Afficher les paramètres OUT et variables hôte
+
+Pour afficher les paramètres OUT, on peut utiliser des variables PL/SQL affichées avec DBMS_OUTPUT.PUT_LINE après SET SERVEROUTPUT ON, ou utiliser des variables hôte. Une variable hôte (aussi appelée variable attachée ou variable globale) est déclarée à l'extérieur du sous-programme PL/SQL, par exemple dans SQL*Plus avec la commande VARIABLE. Elle est précédée de deux-points (:) quand on la référence dans du code PL/SQL. Elle peut être référencée dans un bloc anonyme, mais pas dans un sous-programme stocké. On l'affiche avec la commande PRINT.
+
+6. Méthodes de transmission des paramètres
+
+Il existe trois méthodes pour passer les paramètres réels à une procédure :
+- La méthode positionnelle : les paramètres réels sont listés dans le même ordre que les paramètres formels. Exemple : EXECUTE add_dept('TRAINING', 2500).
+- La méthode par association de noms : les paramètres réels sont listés dans un ordre arbitraire avec l'opérateur d'association =>. Exemple : EXECUTE add_dept(loc => 2400, name => 'EDUCATION').
+- La méthode par combinaison : certains paramètres sont positionnels, d'autres nommés. Exemple : EXECUTE add_dept('ADVERTISING', loc => 1200).
+
+7. Valeurs par défaut des paramètres
+
+L'option DEFAULT (ou l'opérateur :=) permet de définir une valeur par défaut pour un paramètre IN. Si le paramètre est omis lors de l'appel, la valeur par défaut est utilisée. Exemple : name departments.department_name%TYPE := 'Unknown', loc departments.location_id%TYPE DEFAULT 1700.
+
+8. Appeler des procédures
+
+Une procédure peut être appelée à partir d'un bloc anonyme, avec la commande EXECUTE, ou à partir d'une autre procédure. Par exemple, la procédure process_employees parcourt un curseur d'employés et appelle raise_salary pour chaque employé.
+
+9. Gestion des exceptions dans les procédures
+
+Si une exception est déclenchée dans la procédure appelée et traitée par sa propre section EXCEPTION, la procédure appelante reprend normalement son exécution. Dans l'exemple add_department, le traitement WHEN OTHERS affiche un message d'erreur et l'exécution de la procédure create_departments se poursuit pour les départements suivants. Si l'exception n'est pas traitée dans la procédure appelée, elle se propage à la procédure appelante : la section de traitement des exceptions de la procédure appelante prend alors le contrôle, et à défaut le traitement s'arrête.
+
+10. Supprimer et consulter des procédures
+
+On supprime une procédure stockée avec DROP PROCEDURE nom_procedure ; par exemple DROP PROCEDURE raise_salary. Les informations sur les procédures sont enregistrées dans le dictionnaire de données : le code source est visible dans la vue USER_SOURCE pour les sous-programmes dont on est propriétaire, ou dans ALL_SOURCE pour ceux appartenant à d'autres utilisateurs qui ont accordé le privilège EXECUTE. La vue USER_OBJECTS (avec object_type = 'PROCEDURE') liste les noms des procédures.
+
+11. Avantages des sous-programmes
+
+Les sous-programmes stockés apportent une meilleure facilité de maintenance, une sécurité et une intégrité des données accrues, de meilleures performances et une clarté améliorée du code. Ils permettent de modulariser le code de l'application en utilisant des procédures comme blocs constitutifs.

@@ -1,0 +1,91 @@
+PL/SQL : blocs, déclarations et structures de contrôle
+
+1. Introduction à PL/SQL
+
+SQL est un langage complet pour travailler sur une base de données relationnelle, mais il ne comporte pas d'instructions procédurales. PL/SQL est le langage procédural d'Oracle. Il comprend la partie LID de SQL (langage d'interrogation des données, c'est-à-dire l'ordre SELECT), la partie LMD (langage de manipulation des données : INSERT, UPDATE, DELETE), la gestion des transactions (COMMIT et ROLLBACK), les fonctions standard de SQL, et une partie procédurale avec les tests (IF) et les boucles (WHILE, LOOP, FOR).
+
+2. Structure d'un bloc PL/SQL
+
+PL/SQL n'interprète pas une commande isolée, mais un ensemble de commandes contenues dans un programme appelé bloc PL/SQL. Un bloc PL/SQL comporte trois sections :
+- DECLARE : la partie déclarative (variables, constantes, curseurs, exceptions). Elle est optionnelle.
+- BEGIN ... : la partie des commandes exécutables. Elle est obligatoire.
+- EXCEPTION : la partie de gestion des erreurs. Elle est optionnelle.
+Le bloc se termine par le mot-clé END. Les sections DECLARE et EXCEPTION sont optionnelles. Chaque instruction de n'importe quelle section doit se terminer par un point-virgule.
+
+Exemple de bloc PL/SQL :
+
+DECLARE
+  v_total NUMBER := 0;
+BEGIN
+  SELECT COUNT(*) INTO v_total FROM emp;
+  DBMS_OUTPUT.PUT_LINE('Nombre d''employés : ' || v_total);
+EXCEPTION
+  WHEN OTHERS THEN
+    DBMS_OUTPUT.PUT_LINE('Erreur : ' || SQLERRM);
+END;
+
+3. Les déclarations PL/SQL
+
+La partie déclarative d'un bloc PL/SQL est délimitée par les mots-clés DECLARE, qui marque le début de la déclaration des variables, et BEGIN, qui marque la fin de la déclaration et le début de la partie des commandes. Elle peut comporter trois types de déclarations : les variables et les constantes, les curseurs, et les exceptions.
+
+3.1 Types de données
+
+PL/SQL est un langage typé. Les principaux types de variables sont les suivants :
+- NUMBER : type numérique. POSITIVE (entiers positifs) et NATURAL (entiers naturels) sont des restrictions ; DECIMAL, FLOAT, INTEGER et REAL sont des sous-types de NUMBER.
+- CHAR : chaîne de caractères de taille fixe, jusqu'à 32 767 caractères en PL/SQL (le cours indique 255 pour la définition des colonnes de tables).
+- VARCHAR2 : chaîne de caractères de longueur variable, maximum 32 767 en PL/SQL (le cours indique 2000 pour les colonnes de tables).
+- BOOLEAN : type booléen dont les valeurs possibles sont TRUE, FALSE et NULL.
+- DATE : type date d'Oracle.
+- ROWID : type interne d'Oracle, composé de 6 octets d'après le cours, qui permet d'identifier une ligne unique d'une table et d'offrir un accès rapide aux données.
+
+3.2 Variables et constantes
+
+La déclaration d'une variable consiste à allouer un espace pour stocker et modifier une valeur. Elle est typée et peut recevoir une valeur par défaut et/ou un statut NOT NULL. Une constante est définie comme une variable, mais l'utilisateur ne peut pas modifier son contenu. Les variables se définissent dans la partie DECLARE du bloc.
+
+Remarques sur la déclaration d'une variable :
+- L'attribut CONSTANT fige l'affectation d'une variable.
+- L'attribut NOT NULL rend obligatoire l'initialisation de la variable lors de sa définition.
+- L'attribut %TYPE permet de faire référence à une colonne d'une table (nom_variable TABLE.COLONNE%TYPE) ou à une variable précédemment définie (nom_variable autre_variable%TYPE).
+- L'attribut %ROWTYPE permet de faire référence à une ligne entière d'une table (nom_variable TABLE%ROWTYPE).
+- L'initialisation d'une variable se fait par l'opérateur d'affectation := suivi d'une constante, d'une expression PL/SQL ou d'une fonction PL/SQL.
+- Les variables peuvent aussi être définies dans l'environnement extérieur au bloc PL/SQL (par exemple des champs d'écran dans Form Builder). Ces variables hôte sont alors préfixées par deux-points (:).
+
+Exemple de déclaration :
+
+DECLARE
+  v_nom      emp.ename%TYPE;
+  v_ligne    emp%ROWTYPE;
+  c_taux     CONSTANT NUMBER := 0.2;
+  v_actif    BOOLEAN NOT NULL := TRUE;
+
+3.3 Affectation des variables
+
+Deux possibilités d'affectation existent : l'opérateur d'affectation := et la clause SELECT ... INTO ... . La difficulté de la clause SELECT INTO tient au nombre de lignes retournées :
+- si le SELECT retourne une et une seule valeur, l'affectation s'effectue correctement ;
+- si le SELECT ne retourne aucune ligne, l'erreur PL/SQL NO_DATA_FOUND est générée ;
+- si le SELECT retourne plusieurs lignes, l'erreur TOO_MANY_ROWS est générée.
+
+3.4 Les tableaux PL/SQL (TABLE)
+
+PL/SQL fournit deux types d'objets composés : les tableaux (TABLE) et les enregistrements (RECORD). Les tableaux sont conçus comme les tables de la base de données : ils possèdent une clé primaire (index) pour accéder aux lignes et n'ont pas de limite de taille, le nombre d'éléments croissant dynamiquement. Un tableau PL/SQL se déclare en deux étapes : on déclare d'abord le type TABLE, puis une variable de ce type. L'accès à un élément se fait par nom_tab(valeur_cle_primaire), la clé étant de type BINARY_INTEGER. L'affectation se fait avec nom_tab(cle) := expression.
+
+3.5 Les enregistrements (RECORD)
+
+Le type %ROWTYPE a une restriction : il ne permet pas de spécifier les types de données au niveau de l'enregistrement. Le type composé RECORD lève cette restriction. La déclaration se fait aussi en deux étapes : TYPE nom_type IS RECORD (champ type_champ [NOT NULL], ...), puis la déclaration d'une variable de ce type. On accède à un champ par nom_enreg.nom_champ et on l'affecte par nom_enreg.nom_champ := expression.
+
+4. Structures de contrôle
+
+4.1 Les traitements conditionnels
+
+La structure IF ... THEN ... ELSE ... END IF permet d'exécuter des instructions selon une condition. La condition peut utiliser les variables définies ainsi que tous les opérateurs de SQL : =, <, >, <=, >=, <>, IS NULL, IS NOT NULL.
+
+4.2 Les traitements répétitifs
+
+L'instruction LOOP permet de répéter une séquence de commandes comprise entre le mot-clé LOOP et END LOOP. Les commandes EXIT et EXIT WHEN condition permettent de quitter la boucle.
+
+LOOP
+  instructions;
+  EXIT WHEN condition;
+END LOOP;
+
+L'instruction FOR ... LOOP a pour syntaxe : FOR compteur IN [REVERSE] var_debut..var_fin LOOP instructions END LOOP. Le compteur est une variable de type entier, locale à la boucle. Sa valeur de départ est celle de l'expression de gauche (var_debut) ; elle est incrémentée de 1 après chaque passage dans la boucle jusqu'à atteindre la valeur de droite (var_fin). Avec l'option REVERSE, le compteur est décrémenté.

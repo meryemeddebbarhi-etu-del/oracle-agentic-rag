@@ -16,10 +16,17 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any, Optional
 
 import oracledb
 from dotenv import load_dotenv
+
+# Renvoie les CLOB (colonne "text") directement en texte Python. Sans cela,
+# le texte est lu après la fermeture de la connexion quand vector_search /
+# keyword_search ouvrent leur propre connexion -> erreur DPY-1001
+# ("not connected to database").
+oracledb.defaults.fetch_lobs = False
 
 # Ces deux constantes DOIVENT rester identiques à database/ingestion.py
 # (NOM_TABLE et MODELE_EMBEDDING). Elles ne sont volontairement PAS importées
@@ -107,6 +114,19 @@ def valider_top_k(top_k: int) -> int:
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
 
+# Mots vides français : sans eux, une question comme "Que signifie DORA dans le
+# DHCP ?" fait remonter n'importe quel morceau contenant "que", "dans" ou "le".
+_MOTS_VIDES_FR = frozenset({
+    "a", "au", "aux", "avec", "ce", "ces", "cette", "comment", "dans", "de",
+    "des", "du", "elle", "en", "est", "et", "il", "ils", "je", "la", "le",
+    "les", "leur", "lui", "ma", "mais", "me", "mes", "moi", "mon", "ne", "nos",
+    "notre", "nous", "on", "ou", "par", "pas", "pour", "qu", "quand", "que",
+    "quel", "quelle", "quelles", "quels", "qui", "quoi", "sa", "se", "ses",
+    "si", "son", "sont", "sur", "ta", "te", "tes", "toi", "ton", "tu", "un",
+    "une", "vos", "votre", "vous", "y", "signifie", "c", "d", "l", "s",
+})
+
+
 def construire_requete_contains(query: str, fuzzy: bool = False) -> str:
     """Transforme une requête en langage naturel en expression Oracle Text.
 
@@ -122,6 +142,9 @@ def construire_requete_contains(query: str, fuzzy: bool = False) -> str:
     tokens = _TOKEN_RE.findall(query)
     if not tokens:
         return ""
+    # On retire les mots vides ; si la requête n'en contenait que, on la garde telle quelle.
+    utiles = [t for t in tokens if t.lower() not in _MOTS_VIDES_FR]
+    tokens = utiles or tokens
     if fuzzy:
         parts = [f'FUZZY("{tok}")' for tok in tokens]
     else:
@@ -182,20 +205,34 @@ def formater_source(metadata: dict[str, Any]) -> str:
     return str(nom)
 
 
+def _normaliser_nombres(valeur: Any) -> Any:
+    """Convertit récursivement les Decimal renvoyés par Oracle (nombres JSON)
+    en int/float Python, pour que les résultats soient sérialisables en JSON
+    (main.py --json, Streamlit, etc.)."""
+    if isinstance(valeur, Decimal):
+        return int(valeur) if valeur == valeur.to_integral_value() else float(valeur)
+    if isinstance(valeur, dict):
+        return {cle: _normaliser_nombres(v) for cle, v in valeur.items()}
+    if isinstance(valeur, (list, tuple)):
+        return [_normaliser_nombres(v) for v in valeur]
+    return valeur
+
+
 def lire_metadata_json(valeur: Any) -> dict[str, Any]:
     """La colonne JSON peut revenir comme dict (déjà décodé par oracledb) ou comme
-    chaîne selon la configuration du driver : on gère les deux cas sans supposer."""
+    chaîne selon la configuration du driver : on gère les deux cas sans supposer.
+    Les nombres Decimal sont convertis en int/float (voir _normaliser_nombres)."""
     if valeur is None:
         return {}
     if isinstance(valeur, dict):
-        return valeur
+        return _normaliser_nombres(valeur)
     if isinstance(valeur, (bytes, bytearray)):
         valeur = valeur.decode("utf-8", errors="ignore")
     if isinstance(valeur, str):
         import json
 
         try:
-            return json.loads(valeur)
+            return _normaliser_nombres(json.loads(valeur))
         except json.JSONDecodeError:
             return {}
     return {}

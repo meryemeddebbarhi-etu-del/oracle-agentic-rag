@@ -40,6 +40,23 @@ logger = logging.getLogger(__name__)
 
 _METHODES_VALIDES = {"vector", "keyword", "hybrid", "auto"}
 
+# Le LLM (surtout sur Groq) lui arrive d'émettre un appel d'outil invalide, par
+# exemple vers un outil qui n'existe pas (open_file...). Le fournisseur répond
+# alors par une erreur 400 "tool_use_failed". On réessaie quelques fois, puis on
+# se replie sur la recherche hybride directe (sans appel d'outils).
+_NB_RETRIES_OUTILS = 2
+_MARQUEURS_ERREUR_OUTIL = (
+    "tool_use_failed",
+    "tool call validation",
+    "not in request.tools",
+    "failed_generation",
+)
+
+
+def _est_erreur_appel_outil(erreur: Exception) -> bool:
+    texte = str(erreur).lower()
+    return any(marqueur in texte for marqueur in _MARQUEURS_ERREUR_OUTIL)
+
 
 class RAGAgent:
     def __init__(
@@ -121,6 +138,14 @@ class RAGAgent:
                 error=f"Erreur de configuration du LLM : {erreur}", no_answer=True, ambiguous=False,
             )
         except Exception as erreur:  # garde-fou final : jamais de crash pour Streamlit
+            texte = str(erreur).lower()
+            if any(m in texte for m in ("401", "invalid_api_key", "authentication", "api key")):
+                logger.warning("Clé API du LLM refusée : %s", erreur)
+                return build_response_payload(
+                    question=question, answer="", results=[], search_method=method,
+                    error="Clé API du LLM invalide ou expirée. Vérifiez GROQ_API_KEY dans .env.",
+                    no_answer=True, ambiguous=False,
+                )
             logger.exception("Erreur inattendue dans RAGAgent.ask")
             return build_response_payload(
                 question=question, answer="", results=[], search_method=method,
@@ -139,9 +164,25 @@ class RAGAgent:
 
     def _ask_auto(self, question: str, top_k: int) -> dict[str, Any]:
         graphe, recorder = self._assurer_graphe()
-        recorder.reset()
 
-        sortie = graphe.invoke({"messages": [{"role": "user", "content": question}]})
+        sortie = None
+        for tentative in range(1 + _NB_RETRIES_OUTILS):
+            recorder.reset()
+            try:
+                sortie = graphe.invoke({"messages": [{"role": "user", "content": question}]})
+                break
+            except Exception as erreur:
+                if not _est_erreur_appel_outil(erreur):
+                    raise  # autre type d'erreur : gérée par ask()
+                logger.warning(
+                    "Appel d'outil invalide par le LLM (tentative %d/%d) : %s",
+                    tentative + 1, 1 + _NB_RETRIES_OUTILS, erreur,
+                )
+        if sortie is None:
+            # Toutes les tentatives ont échoué : repli sur la recherche hybride directe.
+            logger.warning("Repli sur la recherche hybride directe (mode auto indisponible).")
+            return self._ask_direct(question, "hybrid", top_k)
+
         messages = sortie.get("messages", [])
         reponse_llm = messages[-1].content if messages else ""
 
@@ -162,4 +203,3 @@ class RAGAgent:
             question=question, answer=reponse_finale, results=resultats, search_method=search_method,
             error=None, no_answer=no_answer, ambiguous=ambiguous,
         )
-

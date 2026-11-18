@@ -1,0 +1,68 @@
+Oracle 19c : utilisateurs, privilèges, rôles, profils et audit
+
+1. Les comptes administrateurs fournis par Oracle
+
+Oracle fournit plusieurs comptes d'administration. SYS est le super utilisateur : il possède le dictionnaire de données et l'Automatic Workload Repository (AWR), et sert à démarrer et arrêter l'instance. SYSTEM possède des tables et vues d'administration supplémentaires. D'autres comptes servent à RMAN (SYSBACKUP), Data Guard (SYSDG), la gestion des clés de chiffrement Transparent Data Encryption (SYSKM), Real Application Clusters (SYSRAC) et Enterprise Manager (DBSNMP).
+
+2. Créer des utilisateurs dans un environnement multitenant
+
+Un utilisateur commun (common user) est créé dans la root du CDB et existe dans tous les conteneurs. Son nom commence par le préfixe C## : CREATE USER c##u1 IDENTIFIED BY mot_de_passe CONTAINER=ALL. Un utilisateur local (local user) est créé dans une seule PDB, en se connectant à cette PDB. Pour les conteneurs d'application, les utilisateurs communs sont créés dans la root d'application, le seed et les PDB d'application, au sein d'un bloc INSTALL, UPGRADE ou PATCH BEGIN/END.
+
+Un compte « schema only » est créé avec la clause NO AUTHENTICATION : CREATE USER schema_noauth NO AUTHENTICATION. Il empêche tout utilisateur de se connecter à l'instance sous ce compte, impose l'accès aux données via l'application, protège les objets du schéma contre la suppression par le schéma connecté et ne peut pas se connecter via un lien de base de données.
+
+Un utilisateur se crée avec son tablespace par défaut : CREATE USER salah IDENTIFIED BY mot_de_passe DEFAULT TABLESPACE tbs1.
+
+3. L'authentification des utilisateurs
+
+Chaque utilisateur, y compris les administrateurs, doit être authentifié lors de sa connexion à l'instance. L'authentification vérifie que l'utilisateur est valide et établit une relation de confiance ; elle permet aussi la traçabilité en reliant les actions à des identités précises. Les méthodes sont : mot de passe (pour les utilisateurs de la base), authentification par le système d'exploitation (OS), fichier de mots de passe (pour les utilisateurs administratifs privilégiés), et authentification forte (Kerberos, SSL, annuaire).
+
+Mots de passe : tous les mots de passe sont sensibles à la casse par défaut, peuvent contenir des caractères multioctets et sont limités à 30 octets. Ils sont chiffrés automatiquement avec l'algorithme AES lors des connexions réseau. On peut faire expirer un mot de passe immédiatement pour forcer son changement. Une politique de gestion des mots de passe se règle dans les profils.
+
+Fichier de mots de passe : il stocke les noms d'utilisateur et mots de passe des administrateurs. Pour l'utiliser, on crée le fichier (DBCA le crée), on définit le paramètre REMOTE_LOGIN_PASSWORDFILE et on accorde des privilèges d'administration (par exemple GRANT SYSDBA TO mydba).
+
+Authentification système pour les utilisateurs privilégiés : l'installateur crée des groupes système et les associe à des privilèges. Un membre du groupe OSDBA (dba) obtient SYSDBA (connexion en tant que SYS), un membre du groupe OSOPER obtient SYSOPER, et il existe des groupes pour SYSBACKUP, SYSDG, SYSKM et SYSRAC. On se connecte alors avec CONNECT / AS SYSDBA, CONNECT / AS SYSOPER, CONNECT / AS SYSBACKUP, etc.
+
+4. Les quotas
+
+Un quota est une allocation d'espace dans un tablespace donné. Par défaut, un utilisateur n'a aucun quota sur aucun tablespace. Seuls les comptes qui possèdent des objets (comptes d'application) ont besoin d'un quota. Seules les actions qui consomment de l'espace dans un tablespace comptent dans le quota (CREATE VIEW n'en consomme pas). Le serveur vérifie le quota quand un segment est créé ou étendu. Aucun quota n'est nécessaire sur les tablespaces temporaires ou undo. Le quota est reconstitué quand les objets sont supprimés avec PURGE ou purgés de la corbeille. On donne un quota avec ALTER USER nom QUOTA 100M ON tbs1, QUOTA UNLIMITED ON tbs1 ou avec le privilège système UNLIMITED TABLESPACE.
+
+5. Privilèges système et privilèges objet
+
+Il existe deux types de privilèges : les privilèges système permettent d'effectuer des actions particulières dans la base (par exemple CREATE SESSION, CREATE TABLE, ALTER SYSTEM, DROP USER) ; les privilèges objet permettent d'accéder à un objet précis et de le manipuler (par exemple UPDATE sur la table employees).
+
+- Un privilège système avec la clause ANY (par exemple SELECT ANY TABLE, INSERT ANY TABLE, EXECUTE ANY PROCEDURE) s'applique à tous les schémas sauf SYS, pas seulement au sien.
+- CREATE SESSION est le privilège fondamental qui permet de se connecter ; sans lui l'utilisateur ne peut pas se connecter à la base.
+- Si l'on accorde un privilège système avec WITH ADMIN OPTION, le bénéficiaire peut l'administrer et l'accorder à d'autres utilisateurs.
+- Les privilèges objet s'accordent avec GRANT privilège ON objet TO bénéficiaire [WITH GRANT OPTION] ; WITH GRANT OPTION permet au bénéficiaire de transmettre ce privilège objet à d'autres. Sans autorisation spécifique, les utilisateurs n'accèdent qu'à leurs propres objets. Un privilège objet peut être accordé par le propriétaire de l'objet, par l'administrateur ou par quelqu'un qui a reçu le droit de l'accorder.
+
+Exemple pratique : CREATE USER mg IDENTIFIED BY mg; GRANT CREATE SESSION TO mg WITH ADMIN OPTION; CREATE USER sg IDENTIFIED BY sg; puis, connecté en tant que mg, GRANT CREATE SESSION TO sg. L'utilisateur sg, qui n'a pas reçu ADMIN OPTION, ne peut pas à son tour accorder ce privilège. Avec REVOKE CREATE SESSION FROM mg, mg ne peut plus se connecter. Pour les objets : GRANT SELECT ON hr.employees TO mg WITH GRANT OPTION permet à mg de donner ce SELECT à un autre utilisateur, et REVOKE SELECT ON hr.employees FROM mg retire le droit.
+
+6. Privilèges d'administration
+
+SYSDBA permet d'effectuer toutes les tâches d'administration : créer et supprimer une base, ouvrir et monter, démarrer et arrêter l'instance, créer un SPFILE, passer en mode ARCHIVELOG, faire des récupérations incomplètes, appliquer des correctifs ; il connecte en tant que SYS. SYSOPER permet des tâches similaires mais sans pouvoir consulter les données des utilisateurs : il peut démarrer et arrêter la base, créer un SPFILE et effectuer des récupérations complètes (pas incomplètes). SYSASM administre l'instance ASM, SYSBACKUP les sauvegardes et récupérations avec RMAN, SYSDG les opérations Data Guard, SYSKM les portefeuilles de chiffrement, SYSRAC l'administration de RAC.
+
+7. Accorder des privilèges dans un environnement multitenant
+
+Un privilège accordé de façon commune (commonly) s'applique dans tous les conteneurs du CDB : GRANT create session TO c##c_admin1 CONTAINER=ALL, depuis la root. Un privilège accordé localement (locally) ne vaut que dans une seule PDB : CONNECT SYS@PDB1 AS SYSDBA puis GRANT logmining TO l_user1. La même distinction s'applique aux rôles : GRANT rôle_commun TO utilisateur_commun CONTAINER=ALL, ou, localement dans une PDB, sans CONTAINER=ALL.
+
+8. Les rôles
+
+Un rôle regroupe des privilèges et d'autres rôles. Ses avantages : une gestion des privilèges plus simple, une gestion dynamique des privilèges et une disponibilité sélective des privilèges. Si l'on doit accorder un SELECT à plus de 200 utilisateurs, il vaut mieux créer un rôle : CREATE ROLE hr_select; GRANT SELECT ON hr.employees TO hr_select; GRANT hr_select TO user1, user2. Les rôles fournis par Oracle comprennent DBA (inclut la plupart des privilèges système, à ne pas accorder aux non-administrateurs), CONNECT (permet de se connecter au CDB ou à la PDB seulement quand elle est ouverte), RESOURCE (CREATE CLUSTER, CREATE INDEXTYPE, CREATE OPERATOR, CREATE PROCEDURE, CREATE SEQUENCE, CREATE TABLE, CREATE TRIGGER…), SCHEDULER_ADMIN (CREATE ANY JOB, CREATE JOB, MANAGE SCHEDULER…) et SELECT_CATALOG_ROLE (SELECT sur les objets du dictionnaire de données).
+
+Les rôles sont en général activés par défaut. Pour les sécuriser : rendre un rôle non par défaut, utiliser l'authentification de rôle ou créer des rôles d'application. La commande REVOKE retire des privilèges système ou objet à des utilisateurs ou rôles, et des rôles à des utilisateurs, rôles ou unités de programme.
+
+9. Les profils et les limites de ressources
+
+Un profil est un ensemble nommé de limites de ressources et de règles de mots de passe. Un utilisateur n'est affecté qu'à un seul profil à la fois. Les profils servent à contrôler la consommation de ressources et à gérer l'état des comptes et l'expiration des mots de passe. Pour que les limites de ressources soient appliquées, le paramètre RESOURCE_LIMIT doit valoir TRUE ; avec FALSE, les limites de ressources du profil ne sont pas imposées, mais les paramètres de mots de passe le sont toujours.
+
+Dans un CDB, un profil commun (CREATE PROFILE c##cprofile_dev LIMIT ... CONTAINER=ALL) est répliqué dans tous les conteneurs actuels et futurs ; un profil local (par exemple lprofile_PDB1) est créé dans une seule PDB et n'y est utilisable que là.
+
+Limites de ressources : SESSIONS_PER_USER (sessions simultanées, par défaut illimité), CPU_PER_SESSION et CPU_PER_CALL (temps processeur par session ou par appel), CONNECT_TIME (durée maximale de la session), IDLE_TIME (durée d'inactivité), PRIVATE_SGA (mémoire SGA privée), LOGICAL_READS_PER_SESSION et LOGICAL_READS_PER_CALL (lectures disque ou mémoire). Les limites composites (COMPOSITE_LIMIT) combinent avec des poids le CPU, les lectures, le temps de connexion et la SGA privée.
+
+Paramètres de mots de passe : FAILED_LOGIN_ATTEMPTS (nombre d'échecs de connexion avant le verrouillage du compte) et PASSWORD_LOCK_TIME (durée du verrouillage) pour le verrouillage de compte ; PASSWORD_LIFE_TIME et PASSWORD_GRACE_TIME pour le vieillissement et l'expiration ; PASSWORD_REUSE_TIME et PASSWORD_REUSE_MAX pour l'historique ; PASSWORD_VERIFY_FUNCTION pour la vérification de la complexité, avec des fonctions de vérification fournies par Oracle.
+
+10. L'audit : surveiller l'activité
+
+Un système sécurisé garantit la confidentialité des données : restriction d'accès aux données et services, authentification des utilisateurs et surveillance des activités suspectes. L'audit permet de surveiller les comptes, rôles et privilèges, les actions sur les objets, Data Pump, RMAN, SQL*Loader, etc. Il existe l'audit obligatoire (par exemple CREATE/ALTER/DROP AUDIT POLICY, AUDIT/NOAUDIT, et les instructions des administrateurs SYS, SYSDBA, SYSOPER avant l'ouverture de la base), l'audit standard, l'audit basé sur les valeurs et l'audit détaillé (FGA).
+
+L'audit unifié (unified auditing) est recommandé : on crée des politiques d'audit avec CREATE AUDIT POLICY, par exemple CREATE AUDIT POLICY select_emp_pol ACTIONS select ON hr.employees, puis on l'active avec AUDIT POLICY. Le mode mixte est le mode par défaut d'une nouvelle base ; on vérifie la migration avec SELECT VALUE FROM V$OPTION WHERE PARAMETER = 'Unified Auditing'. Les rôles AUDIT_ADMIN (créer des politiques, exécuter AUDIT et NOAUDIT, consulter et gérer la piste d'audit) et AUDIT_VIEWER (consulter et analyser les données d'audit) sont nécessaires pour auditer.

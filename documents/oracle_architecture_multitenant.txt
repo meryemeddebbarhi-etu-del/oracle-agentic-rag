@@ -1,0 +1,57 @@
+Oracle Database 19c : architecture, instance et architecture multitenant
+
+1. Architecture générale d'un serveur Oracle Database
+
+Un serveur Oracle Database est composé d'une instance et d'une base de données. L'instance est constituée de structures de mémoire (la SGA, System Global Area) et de processus d'arrière-plan (background processes). La base de données (database) correspond aux structures de stockage sur disque : les fichiers de données, les fichiers de contrôle et les fichiers de journalisation (redo log). Les applications clientes se connectent à l'instance, pas directement à la base de données.
+
+Un processus utilisateur (user process) tourne côté client. Il communique avec un processus serveur (server process) qui exécute les ordres SQL pour son compte. Chaque processus serveur dispose de sa propre zone mémoire privée appelée PGA (Program Global Area), alors que la SGA est partagée entre tous les processus de l'instance.
+
+2. Les fichiers d'une base de données Oracle
+
+Les structures physiques de stockage d'une base Oracle comprennent :
+- les fichiers de données (data files), qui contiennent les données des tablespaces ;
+- les fichiers de contrôle (control files), qui décrivent la structure physique de la base ;
+- les fichiers de journalisation en ligne (online redo log files), qui enregistrent les modifications pour permettre la reprise après incident ;
+- les journaux archivés (archived redo log files) ;
+- le fichier de paramètres d'initialisation (parameter file, SPFILE ou PFILE) ;
+- le fichier de mots de passe (password file) ;
+- les fichiers de sauvegarde (backup files) ;
+- les fichiers de journaux et de traces (log and trace files).
+
+3. Les composants de la SGA
+
+La SGA est la zone de mémoire partagée occupée au démarrage de l'instance. Ses principaux composants sont :
+- le shared pool, qui met en cache les ordres SQL analysés, le code PL/SQL et les informations du dictionnaire de données pour éviter de les analyser à chaque exécution ;
+- le database buffer cache, qui met en cache les blocs de données lus depuis les fichiers de données, afin d'éviter des lectures disque répétées ;
+- le redo log buffer, tampon qui contient les enregistrements de redo (les modifications apportées aux données) avant leur écriture dans les fichiers redo log, ce qui permet la reprise après incident ;
+- le large pool, zone optionnelle pour les opérations volumineuses (sauvegarde RMAN, serveur partagé) ;
+- le java pool, pour le code Java exécuté dans la base ;
+- le streams pool, utilisé par Oracle Streams.
+La PGA, elle, est privée à chaque processus serveur : elle contient notamment les zones de tri et les variables de session. Le paramètre SGA_TARGET permet la gestion automatique de la SGA.
+
+4. Configurations d'instance : monoinstance et cluster
+
+Dans un système non cluster, une seule instance (I1) accède à une base de données stockée localement. Dans un système cluster (Oracle Real Application Clusters), plusieurs instances (I1, I2, I3) sur des serveurs différents accèdent à la même base de données sur un stockage partagé, ce qui apporte la haute disponibilité et la scalabilité.
+
+5. Architecture multitenant : CDB et PDB
+
+L'architecture multitenant permet à une seule base de données conteneur (CDB, Container Database) d'héberger plusieurs bases de données pluggables (PDB, Pluggable Database). Un conteneur (container) est une collection logique de données ou de métadonnées dans l'architecture multitenant. Une PDB est une collection portable de schémas, d'objets de schéma et d'objets hors schéma.
+
+Les conteneurs d'un CDB sont :
+- la CDB root (aussi appelée root, CDB$ROOT), qui contient les métadonnées fournies par Oracle et les utilisateurs communs ;
+- le système conteneur (system container), qui comprend la root et toutes les PDB ;
+- la PDB seed (PDB$SEED), un modèle en lecture seule utilisé pour créer rapidement de nouvelles PDB ;
+- les PDB créées par l'utilisateur (par exemple SALES et HR) ;
+- les conteneurs d'application (application containers).
+
+6. Ce que partagent les PDB d'un même CDB
+
+Toutes les PDB d'un CDB partagent : les processus d'arrière-plan, la gestion de la mémoire partagée et certaines structures mémoire, une partie des métadonnées Oracle, les fichiers redo log, les fichiers de contrôle et le tablespace UNDO partagé (par défaut). Chaque PDB possède en revanche ses propres fichiers de données (tablespaces SYSTEM, SYSAUX, etc.). Le grand avantage de l'architecture multitenant est de consolider plusieurs bases sur une seule instance, avec moins de ressources et une administration simplifiée : sauvegarder, patcher ou mettre à niveau le CDB une seule fois, tout en gardant l'isolation entre les PDB.
+
+7. Le partitionnement horizontal : Database Sharding
+
+Le sharding de base de données est une architecture shared-nothing (sans partage) conçue pour la scalabilité et la disponibilité. Les données sont partitionnées horizontalement sur des bases de données indépendantes, appelées shards, hébergées sur des serveurs différents (par exemple Server A, B et C). La couche de données est faiblement couplée, sans clusterware. Une table shardée est répartie sur plusieurs bases (par exemple 3), alors qu'une table non shardée reste dans une seule base. L'ensemble forme une base de données shardée (SDB).
+
+8. Connexion, session et services
+
+Une connexion (connection) est la communication entre un processus utilisateur et une instance. Une session représente l'état de la connexion d'un utilisateur à l'instance. Les clients atteignent l'instance par l'intermédiaire du listener Oracle Net, qui oriente la demande vers un processus serveur dédié ou partagé. Chaque PDB expose son propre service, qui est enregistré auprès du listener.

@@ -1,0 +1,59 @@
+Oracle 19c : stockage de la base de données et gestion des tablespaces
+
+1. Structures logiques et physiques
+
+Une base de données Oracle comporte des structures logiques et des structures physiques. Du point de vue logique, la base est divisée en tablespaces ; un tablespace contient des segments, un segment est une collection d'extents (extensions), un extent est une collection de blocs de données ou d'undo, et chaque bloc Oracle correspond à des blocs disque. Du point de vue physique, un tablespace est stocké dans un ou plusieurs fichiers de données (data files) sur le système de fichiers.
+
+La taille d'un bloc de données Oracle est par défaut de 8 Ko (paramètre DB_BLOCK_SIZE). Un extent est un groupe de blocs contigus (par exemple 64 Ko ou 128 Ko). Un tablespace de type bigfile ne contient qu'un seul fichier de données pouvant atteindre 128 To, alors qu'un tablespace smallfile peut en contenir plusieurs.
+
+2. Les types de segments
+
+Un segment est un ensemble d'extents alloués à une structure logique donnée. Les types de segments incluent : table et cluster, index, undo et temporaire. Les segments sont alloués dynamiquement par le serveur Oracle. Un bloc de données contient un en-tête de bloc, de l'espace libre (free space) qui permet la croissance des lignes, et les données des lignes.
+
+3. Les tablespaces par défaut
+
+- SYSTEM : utilisé pour les fonctions de base. Dans la root, il contient les métadonnées fournies par Oracle ; dans une PDB, il contient les métadonnées de l'utilisateur. Il contient notamment les tables du dictionnaire de données.
+- SYSAUX : tablespace auxiliaire de SYSTEM qui réduit sa charge ; il existe dans la root et dans chaque PDB.
+- TEMP : contient des objets de schéma uniquement pour la durée d'une session (tris, opérations temporaires). Il y a un tablespace temporaire par défaut pour la root et un pour chaque PDB.
+- UNDO : stocke les données nécessaires pour annuler (rollback) les modifications de la base. Un seul tablespace undo est actif dans la root ; il est recommandé d'avoir un undo local dans chaque PDB.
+- USERS : stocke les objets et données des utilisateurs ; il est créé par défaut dans la root uniquement.
+Les tablespaces SYSTEM et SYSAUX sont obligatoires, créés à la création de la base, et doivent être en ligne. Ils ne doivent pas servir à stocker les données d'application.
+
+4. Création différée des segments (deferred segment creation)
+
+Le paramètre DEFERRED_SEGMENT_CREATION vaut TRUE par défaut : à la création d'une table, d'un index ou d'une partition, seule une opération sur le dictionnaire de données a lieu. Le segment n'est créé qu'à la première insertion de données (DML). Cela économise de l'espace disque et accélère l'installation de grosses applications. On peut le contrôler par le paramètre (fichier d'initialisation, ALTER SESSION, ALTER SYSTEM) ou par la clause SEGMENT CREATION IMMEDIATE ou DEFERRED dans CREATE TABLE.
+
+5. Surveiller l'espace d'un tablespace
+
+Le processus MMON surveille l'utilisation de l'espace des tablespaces et génère des alertes : un seuil d'avertissement (warning) à 85 % et un seuil critique à 97 %. Pour les tablespaces en lecture seule ou hors ligne, on ne définit pas d'alertes. Pour un tablespace temporaire, le seuil correspond à l'espace actuellement utilisé par les sessions ; pour un undo, à l'espace utilisé par les extents actifs et non expirés ; pour des fichiers à extension automatique, il est basé sur la taille maximale du fichier.
+
+6. Créer des tablespaces
+
+Un tablespace est une allocation d'espace dans la base de données qui peut contenir des objets de schéma. On le crée avec l'instruction CREATE TABLESPACE ou un outil graphique. Il existe trois types :
+- permanent : contient des objets de schéma persistants, stockés dans des fichiers de données ;
+- undo : type particulier de tablespace permanent utilisé par Oracle pour gérer les données d'annulation (undo) en mode de gestion automatique ;
+- temporaire (temporary) : contient des objets de schéma uniquement pour la durée d'une session, stockés dans des fichiers temporaires (temp files).
+
+Les clauses de CREATE TABLESPACE incluent : DATAFILE ou TEMPFILE (nom, emplacement et taille initiale du fichier), ONLINE ou OFFLINE, BLOCKSIZE (taille de bloc non standard), EXTENT MANAGEMENT (gestion des extents) et SEGMENT MANAGEMENT (suivi de l'espace libre par bitmaps ou listes libres).
+
+CREATE TABLESPACE tbs1 DATAFILE 'tbs1_data.dbf' SIZE 100M;
+
+Dans un CDB, on crée un tablespace permanent dans la root en se connectant à la root (par exemple CONNECT system@cdb1) et dans une PDB en se connectant à la PDB (CONNECT system@PDB1). On définit le tablespace permanent par défaut de la root avec ALTER DATABASE DEFAULT TABLESPACE, et celui d'une PDB avec ALTER PLUGGABLE DATABASE DEFAULT TABLESPACE. Un seul tablespace temporaire par défaut (ou groupe de tablespaces) est autorisé par CDB ou PDB : ALTER DATABASE DEFAULT TEMPORARY TABLESPACE local_temp.
+
+Exemple de tablespace temporaire : CREATE TEMPORARY TABLESPACE temporarytablespace TEMPFILE 'temptbs_file.dbf' SIZE 1000M;
+
+7. Agrandir la base de données
+
+On peut agrandir la base de quatre façons : créer un nouveau tablespace, ajouter un fichier de données à un tablespace smallfile existant, augmenter la taille d'un fichier de données (ALTER DATABASE DATAFILE 'tbs1_data.dbf' RESIZE 200M), ou prévoir la croissance dynamique d'un fichier avec AUTOEXTEND : CREATE TABLESPACE tbs3 DATAFILE 'tbs3_data.dbf' SIZE 1M AUTOEXTEND ON NEXT 20M. Il faut être prudent avec AUTOEXTEND : le fichier peut consommer rapidement l'espace du disque et provoquer des problèmes de stockage. Il est recommandé de créer des tablespaces distincts par application ou par utilisateur pour mieux gérer l'espace.
+
+8. Modifier et supprimer des tablespaces
+
+À sa création, un tablespace est en lecture-écriture. L'instruction ALTER TABLESPACE permet de le mettre hors ligne (OFFLINE) ou en ligne (ONLINE), d'y ajouter des fichiers de données ou temporaires, ou de le passer en lecture seule (READ ONLY : seules les requêtes SELECT sont permises). Un tablespace hors ligne ne permet aucune action sur ses données. On le supprime avec DROP TABLESPACE nom INCLUDING CONTENTS : supprime le tablespace et son contenu ; sans AND DATAFILES, les fichiers de données restent sur le disque. DROP TABLESPACE nom INCLUDING CONTENTS AND DATAFILES supprime aussi les fichiers ; CASCADE CONSTRAINTS supprime les contraintes de clés étrangères qui référencent les tables du tablespace.
+
+9. Déplacer ou renommer un fichier de données en ligne
+
+ALTER DATABASE MOVE DATAFILE '/disk1/myexample01.dbf' TO '/disk2/myexample01.dbf' déplace un fichier en ligne ; avec TO '+DiskGroup2' KEEP, on copie le fichier vers ASM en conservant l'original ; avec TO '/disk1/myexample02.dbf' dans le même répertoire, on le renomme. Pour déplacer une table vers un autre tablespace, par exemple sur un disque plus rapide : ALTER TABLE nom_table MOVE TABLESPACE nouveau_tablespace.
+
+10. Oracle Managed Files (OMF) et vues utiles
+
+Avec OMF, on spécifie les opérations sur les fichiers en termes d'objets de base de données plutôt que de noms de fichiers. Les paramètres sont DB_CREATE_FILE_DEST (répertoire par défaut des fichiers de données), DB_CREATE_ONLINE_LOG_DEST_n (emplacement des fichiers redo log et de contrôle) et DB_RECOVERY_FILE_DEST (zone de récupération rapide). Après ALTER SYSTEM SET DB_CREATE_FILE_DEST='/u01/app/oracle/oradata', un simple CREATE TABLESPACE tbs_1 suffit. Les informations se trouvent dans les vues DBA_TABLESPACES, CDB_TABLESPACES, V$TABLESPACE, DBA_DATA_FILES, CDB_DATA_FILES, DBA_TEMP_FILES et CDB_TEMP_FILES ; SELECT tablespace_name, file_name FROM dba_data_files liste les fichiers.

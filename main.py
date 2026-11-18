@@ -21,7 +21,7 @@ from agent import RAGAgent
 
 def _afficher_reponse(reponse: dict, en_json: bool) -> None:
     if en_json:
-        print(json.dumps(reponse, ensure_ascii=False, indent=2))
+        print(json.dumps(reponse, ensure_ascii=False, indent=2, default=str))
         return
 
     print("\n" + "=" * 70)

@@ -1,7 +1,0 @@
-TCP et UDP sont deux protocoles de la couche transport.
-
-TCP (Transmission Control Protocol) est un protocole orienté connexion. Avant d'échanger des données, le client et le serveur établissent une connexion avec une procédure en trois étapes appelée three-way handshake. TCP garantit que les données arrivent dans le bon ordre et sans perte, grâce aux accusés de réception et aux retransmissions.
-
-UDP (User Datagram Protocol) est un protocole sans connexion. Il envoie les paquets sans vérifier leur arrivée. Il est plus rapide que TCP, mais moins fiable. On l'utilise pour le streaming vidéo, les jeux en ligne et les appels vocaux.
-
-Le port 80 est utilisé par HTTP et le port 443 par HTTPS. Le protocole DNS utilise surtout UDP sur le port 53.
